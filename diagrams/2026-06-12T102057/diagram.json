@@ -1,0 +1,511 @@
+{
+  "version": 2,
+  "nodes": [
+    {
+      "type": "frame",
+      "id": "root",
+      "x": 0,
+      "y": 0,
+      "width": 1280,
+      "height": "fit-content",
+      "layout": "vertical",
+      "gap": 24,
+      "padding": 28,
+      "fillColor": "#FFFFFF",
+      "borderColor": "#DEE0E3",
+      "borderWidth": 2,
+      "borderRadius": 8,
+      "children": [
+        {
+          "type": "text",
+          "id": "title",
+          "width": "fill-container",
+          "height": "fit-content",
+          "text": "Agent 调用飞书画板的原理：DSL 是可控的中间层",
+          "fontSize": 26,
+          "textColor": "#1F2329",
+          "textAlign": "center"
+        },
+        {
+          "type": "frame",
+          "id": "subtitle_row",
+          "width": "fill-container",
+          "height": "fit-content",
+          "layout": "horizontal",
+          "gap": 16,
+          "padding": 0,
+          "alignItems": "stretch",
+          "children": [
+            {
+              "type": "rect",
+              "id": "principle_note",
+              "width": "fill-container",
+              "height": "fit-content",
+              "text": "核心链路：自然语言需求 -> Agent 规划 -> DSL 结构化图元 -> whiteboard-cli 转换 -> 飞书画板可编辑节点",
+              "fillColor": "#F0F4FC",
+              "borderColor": "#5178C6",
+              "borderWidth": 2,
+              "borderRadius": 8,
+              "fontSize": 14,
+              "textColor": "#1F2329",
+              "textAlign": "center",
+              "verticalAlign": "middle"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "main",
+          "width": "fill-container",
+          "height": "fit-content",
+          "layout": "horizontal",
+          "gap": 24,
+          "padding": 0,
+          "alignItems": "stretch",
+          "children": [
+            {
+              "type": "frame",
+              "id": "flow_panel",
+              "width": "fill-container",
+              "height": "fit-content",
+              "layout": "vertical",
+              "gap": 18,
+              "padding": 22,
+              "fillColor": "#F0F4FC",
+              "borderColor": "#5178C6",
+              "borderWidth": 2,
+              "borderRadius": 8,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "flow_title",
+                  "width": "fill-container",
+                  "height": "fit-content",
+                  "text": "一、调用链路",
+                  "fontSize": 20,
+                  "textColor": "#1F2329",
+                  "textAlign": "center"
+                },
+                {
+                  "type": "frame",
+                  "id": "step_1",
+                  "width": "fill-container",
+                  "height": "fit-content",
+                  "layout": "vertical",
+                  "gap": 5,
+                  "padding": 14,
+                  "fillColor": "#FFFFFF",
+                  "borderColor": "#5178C6",
+                  "borderWidth": 2,
+                  "borderRadius": 8,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "step_1_title",
+                      "width": "fill-container",
+                      "height": "fit-content",
+                      "text": "1. 人提出目标",
+                      "fontSize": 16,
+                      "textColor": "#1F2329",
+                      "textAlign": "center"
+                    },
+                    {
+                      "type": "text",
+                      "id": "step_1_desc",
+                      "width": "fill-container",
+                      "height": "fit-content",
+                      "text": "比如：帮我画清楚 Agent 如何调用飞书画板",
+                      "fontSize": 13,
+                      "textColor": "#646A73",
+                      "textAlign": "center"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "step_2",
+                  "width": "fill-container",
+                  "height": "fit-content",
+                  "layout": "vertical",
+                  "gap": 5,
+                  "padding": 14,
+                  "fillColor": "#FFFFFF",
+                  "borderColor": "#5178C6",
+                  "borderWidth": 2,
+                  "borderRadius": 8,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "step_2_title",
+                      "width": "fill-container",
+                      "height": "fit-content",
+                      "text": "2. Agent 做语义规划",
+                      "fontSize": 16,
+                      "textColor": "#1F2329",
+                      "textAlign": "center"
+                    },
+                    {
+                      "type": "text",
+                      "id": "step_2_desc",
+                      "width": "fill-container",
+                      "height": "fit-content",
+                      "text": "拆出对象、层级、关系、重点和图表类型",
+                      "fontSize": 13,
+                      "textColor": "#646A73",
+                      "textAlign": "center"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "step_3",
+                  "width": "fill-container",
+                  "height": "fit-content",
+                  "layout": "vertical",
+                  "gap": 5,
+                  "padding": 14,
+                  "fillColor": "#FFFFFF",
+                  "borderColor": "#8569CB",
+                  "borderWidth": 2,
+                  "borderRadius": 8,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "step_3_title",
+                      "width": "fill-container",
+                      "height": "fit-content",
+                      "text": "3. 生成 DSL",
+                      "fontSize": 16,
+                      "textColor": "#1F2329",
+                      "textAlign": "center"
+                    },
+                    {
+                      "type": "text",
+                      "id": "step_3_desc",
+                      "width": "fill-container",
+                      "height": "fit-content",
+                      "text": "用 JSON 描述 frame、rect、text、connector、颜色和布局",
+                      "fontSize": 13,
+                      "textColor": "#646A73",
+                      "textAlign": "center"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "step_4",
+                  "width": "fill-container",
+                  "height": "fit-content",
+                  "layout": "vertical",
+                  "gap": 5,
+                  "padding": 14,
+                  "fillColor": "#FFFFFF",
+                  "borderColor": "#8569CB",
+                  "borderWidth": 2,
+                  "borderRadius": 8,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "step_4_title",
+                      "width": "fill-container",
+                      "height": "fit-content",
+                      "text": "4. 渲染和校验",
+                      "fontSize": 16,
+                      "textColor": "#1F2329",
+                      "textAlign": "center"
+                    },
+                    {
+                      "type": "text",
+                      "id": "step_4_desc",
+                      "width": "fill-container",
+                      "height": "fit-content",
+                      "text": "先生成 PNG 看是否截断、重叠、连线混乱",
+                      "fontSize": 13,
+                      "textColor": "#646A73",
+                      "textAlign": "center"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "step_5",
+                  "width": "fill-container",
+                  "height": "fit-content",
+                  "layout": "vertical",
+                  "gap": 5,
+                  "padding": 14,
+                  "fillColor": "#FFFFFF",
+                  "borderColor": "#509863",
+                  "borderWidth": 2,
+                  "borderRadius": 8,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "step_5_title",
+                      "width": "fill-container",
+                      "height": "fit-content",
+                      "text": "5. 转成飞书 OpenAPI 节点",
+                      "fontSize": 16,
+                      "textColor": "#1F2329",
+                      "textAlign": "center"
+                    },
+                    {
+                      "type": "text",
+                      "id": "step_5_desc",
+                      "width": "fill-container",
+                      "height": "fit-content",
+                      "text": "whiteboard-cli 把 DSL 转为飞书能写入的 raw 结构",
+                      "fontSize": 13,
+                      "textColor": "#646A73",
+                      "textAlign": "center"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "step_6",
+                  "width": "fill-container",
+                  "height": "fit-content",
+                  "layout": "vertical",
+                  "gap": 5,
+                  "padding": 14,
+                  "fillColor": "#FFFFFF",
+                  "borderColor": "#509863",
+                  "borderWidth": 2,
+                  "borderRadius": 8,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "step_6_title",
+                      "width": "fill-container",
+                      "height": "fit-content",
+                      "text": "6. 写入飞书画板",
+                      "fontSize": 16,
+                      "textColor": "#1F2329",
+                      "textAlign": "center"
+                    },
+                    {
+                      "type": "text",
+                      "id": "step_6_desc",
+                      "width": "fill-container",
+                      "height": "fit-content",
+                      "text": "调用 whiteboard +update，画板里得到可编辑对象",
+                      "fontSize": 13,
+                      "textColor": "#646A73",
+                      "textAlign": "center"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "value_panel",
+              "width": 420,
+              "height": "fit-content",
+              "layout": "vertical",
+              "gap": 18,
+              "padding": 22,
+              "fillColor": "#EAE2FE",
+              "borderColor": "#8569CB",
+              "borderWidth": 2,
+              "borderRadius": 8,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "value_title",
+                  "width": "fill-container",
+                  "height": "fit-content",
+                  "text": "二、DSL 的价值",
+                  "fontSize": 20,
+                  "textColor": "#1F2329",
+                  "textAlign": "center"
+                },
+                {
+                  "type": "rect",
+                  "id": "value_1",
+                  "width": "fill-container",
+                  "height": "fit-content",
+                  "text": "可解释\n模型输出不是黑盒图片，而是一组结构化节点",
+                  "fillColor": "#FFFFFF",
+                  "borderColor": "#8569CB",
+                  "borderWidth": 2,
+                  "borderRadius": 8,
+                  "fontSize": 14,
+                  "textColor": "#1F2329",
+                  "textAlign": "center",
+                  "verticalAlign": "middle"
+                },
+                {
+                  "type": "rect",
+                  "id": "value_2",
+                  "width": "fill-container",
+                  "height": "fit-content",
+                  "text": "可校验\n写入前能检查文字溢出、节点重叠和连线问题",
+                  "fillColor": "#FFFFFF",
+                  "borderColor": "#8569CB",
+                  "borderWidth": 2,
+                  "borderRadius": 8,
+                  "fontSize": 14,
+                  "textColor": "#1F2329",
+                  "textAlign": "center",
+                  "verticalAlign": "middle"
+                },
+                {
+                  "type": "rect",
+                  "id": "value_3",
+                  "width": "fill-container",
+                  "height": "fit-content",
+                  "text": "可复用\n同一套 DSL 可以改文案、换配色、重排版",
+                  "fillColor": "#FFFFFF",
+                  "borderColor": "#8569CB",
+                  "borderWidth": 2,
+                  "borderRadius": 8,
+                  "fontSize": 14,
+                  "textColor": "#1F2329",
+                  "textAlign": "center",
+                  "verticalAlign": "middle"
+                },
+                {
+                  "type": "rect",
+                  "id": "value_4",
+                  "width": "fill-container",
+                  "height": "fit-content",
+                  "text": "可编辑\n最终落到飞书画板，团队还能继续拖拽修改",
+                  "fillColor": "#FFFFFF",
+                  "borderColor": "#8569CB",
+                  "borderWidth": 2,
+                  "borderRadius": 8,
+                  "fontSize": 14,
+                  "textColor": "#1F2329",
+                  "textAlign": "center",
+                  "verticalAlign": "middle"
+                },
+                {
+                  "type": "frame",
+                  "id": "tradeoff_box",
+                  "width": "fill-container",
+                  "height": "fit-content",
+                  "layout": "vertical",
+                  "gap": 6,
+                  "padding": 14,
+                  "fillColor": "#FEF1CE",
+                  "borderColor": "#D4B45B",
+                  "borderWidth": 2,
+                  "borderRadius": 8,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "tradeoff_title",
+                      "width": "fill-container",
+                      "height": "fit-content",
+                      "text": "边界",
+                      "fontSize": 16,
+                      "textColor": "#1F2329",
+                      "textAlign": "center"
+                    },
+                    {
+                      "type": "text",
+                      "id": "tradeoff_desc",
+                      "width": "fill-container",
+                      "height": "fit-content",
+                      "text": "DSL 适合结构图和流程图；如果追求艺术化插画，SVG 或图片更合适。",
+                      "fontSize": 13,
+                      "textColor": "#646A73",
+                      "textAlign": "left"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "connector",
+      "id": "c_1_2",
+      "connector": {
+        "from": "step_1",
+        "to": "step_2",
+        "fromAnchor": "bottom",
+        "toAnchor": "top",
+        "lineShape": "straight",
+        "lineColor": "#BBBFC4",
+        "lineWidth": 2,
+        "endArrow": "arrow"
+      }
+    },
+    {
+      "type": "connector",
+      "id": "c_2_3",
+      "connector": {
+        "from": "step_2",
+        "to": "step_3",
+        "fromAnchor": "bottom",
+        "toAnchor": "top",
+        "lineShape": "straight",
+        "lineColor": "#BBBFC4",
+        "lineWidth": 2,
+        "endArrow": "arrow"
+      }
+    },
+    {
+      "type": "connector",
+      "id": "c_3_4",
+      "connector": {
+        "from": "step_3",
+        "to": "step_4",
+        "fromAnchor": "bottom",
+        "toAnchor": "top",
+        "lineShape": "straight",
+        "lineColor": "#BBBFC4",
+        "lineWidth": 2,
+        "endArrow": "arrow"
+      }
+    },
+    {
+      "type": "connector",
+      "id": "c_4_5",
+      "connector": {
+        "from": "step_4",
+        "to": "step_5",
+        "fromAnchor": "bottom",
+        "toAnchor": "top",
+        "lineShape": "straight",
+        "lineColor": "#BBBFC4",
+        "lineWidth": 2,
+        "endArrow": "arrow"
+      }
+    },
+    {
+      "type": "connector",
+      "id": "c_5_6",
+      "connector": {
+        "from": "step_5",
+        "to": "step_6",
+        "fromAnchor": "bottom",
+        "toAnchor": "top",
+        "lineShape": "straight",
+        "lineColor": "#BBBFC4",
+        "lineWidth": 2,
+        "endArrow": "arrow"
+      }
+    },
+    {
+      "type": "connector",
+      "id": "c_dsl_value",
+      "connector": {
+        "from": "step_3",
+        "to": "value_panel",
+        "fromAnchor": "right",
+        "toAnchor": "left",
+        "lineShape": "curve",
+        "lineColor": "#BBBFC4",
+        "lineWidth": 2,
+        "lineStyle": "dashed",
+        "endArrow": "arrow"
+      }
+    }
+  ]
+}

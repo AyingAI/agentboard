@@ -1,0 +1,347 @@
+{
+  "version": 2,
+  "nodes": [
+    {
+      "type": "frame",
+      "id": "root",
+      "x": 0,
+      "y": 0,
+      "width": 1280,
+      "height": "fit-content",
+      "layout": "vertical",
+      "gap": 24,
+      "padding": 28,
+      "fillColor": "#FFFFFF",
+      "borderColor": "#DEE0E3",
+      "borderWidth": 2,
+      "borderRadius": 8,
+      "children": [
+        {
+          "type": "text",
+          "id": "title",
+          "width": "fill-container",
+          "height": "fit-content",
+          "text": "人和 Agent 通过 DSL 协作：白板成为共享外部大脑",
+          "fontSize": 26,
+          "textColor": "#1F2329",
+          "textAlign": "center"
+        },
+        {
+          "type": "frame",
+          "id": "loop",
+          "width": "fill-container",
+          "height": "fit-content",
+          "layout": "horizontal",
+          "gap": 22,
+          "padding": 0,
+          "alignItems": "stretch",
+          "children": [
+            {
+              "type": "frame",
+              "id": "human_area",
+              "width": "fill-container",
+              "height": "fit-content",
+              "layout": "vertical",
+              "gap": 16,
+              "padding": 22,
+              "fillColor": "#F0F4FC",
+              "borderColor": "#5178C6",
+              "borderWidth": 2,
+              "borderRadius": 8,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "human_title",
+                  "width": "fill-container",
+                  "height": "fit-content",
+                  "text": "人类侧：低门槛表达",
+                  "fontSize": 20,
+                  "textColor": "#1F2329",
+                  "textAlign": "center"
+                },
+                {
+                  "type": "rect",
+                  "id": "natural_language",
+                  "width": "fill-container",
+                  "height": "fit-content",
+                  "text": "自然语言\n说目标、补背景、提约束",
+                  "fillColor": "#FFFFFF",
+                  "borderColor": "#5178C6",
+                  "borderWidth": 2,
+                  "borderRadius": 8,
+                  "fontSize": 14,
+                  "textColor": "#1F2329",
+                  "textAlign": "center",
+                  "verticalAlign": "middle"
+                },
+                {
+                  "type": "rect",
+                  "id": "whiteboard_sketch",
+                  "width": "fill-container",
+                  "height": "fit-content",
+                  "text": "白板草图\n画框、箭头、分组、便签",
+                  "fillColor": "#FFFFFF",
+                  "borderColor": "#5178C6",
+                  "borderWidth": 2,
+                  "borderRadius": 8,
+                  "fontSize": 14,
+                  "textColor": "#1F2329",
+                  "textAlign": "center",
+                  "verticalAlign": "middle"
+                },
+                {
+                  "type": "rect",
+                  "id": "human_feedback",
+                  "width": "fill-container",
+                  "height": "fit-content",
+                  "text": "直接编辑\n拖动、改字、补节点",
+                  "fillColor": "#FFFFFF",
+                  "borderColor": "#5178C6",
+                  "borderWidth": 2,
+                  "borderRadius": 8,
+                  "fontSize": 14,
+                  "textColor": "#1F2329",
+                  "textAlign": "center",
+                  "verticalAlign": "middle"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "dsl_area",
+              "width": 330,
+              "height": "fit-content",
+              "layout": "vertical",
+              "gap": 16,
+              "padding": 22,
+              "fillColor": "#EAE2FE",
+              "borderColor": "#8569CB",
+              "borderWidth": 2,
+              "borderRadius": 8,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "dsl_title",
+                  "width": "fill-container",
+                  "height": "fit-content",
+                  "text": "DSL 中间层",
+                  "fontSize": 20,
+                  "textColor": "#1F2329",
+                  "textAlign": "center"
+                },
+                {
+                  "type": "rect",
+                  "id": "dsl_schema",
+                  "width": "fill-container",
+                  "height": "fit-content",
+                  "text": "结构协议\nnodes / edges / groups / styles",
+                  "fillColor": "#FFFFFF",
+                  "borderColor": "#8569CB",
+                  "borderWidth": 2,
+                  "borderRadius": 8,
+                  "fontSize": 14,
+                  "textColor": "#1F2329",
+                  "textAlign": "center",
+                  "verticalAlign": "middle"
+                },
+                {
+                  "type": "rect",
+                  "id": "dsl_validation",
+                  "width": "fill-container",
+                  "height": "fit-content",
+                  "text": "可校验\n缺节点、错连线、文字溢出",
+                  "fillColor": "#FFFFFF",
+                  "borderColor": "#8569CB",
+                  "borderWidth": 2,
+                  "borderRadius": 8,
+                  "fontSize": 14,
+                  "textColor": "#1F2329",
+                  "textAlign": "center",
+                  "verticalAlign": "middle"
+                },
+                {
+                  "type": "rect",
+                  "id": "dsl_transform",
+                  "width": "fill-container",
+                  "height": "fit-content",
+                  "text": "可转换\n画板、前端、文档、任务",
+                  "fillColor": "#FFFFFF",
+                  "borderColor": "#8569CB",
+                  "borderWidth": 2,
+                  "borderRadius": 8,
+                  "fontSize": 14,
+                  "textColor": "#1F2329",
+                  "textAlign": "center",
+                  "verticalAlign": "middle"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "agent_area",
+              "width": "fill-container",
+              "height": "fit-content",
+              "layout": "vertical",
+              "gap": 16,
+              "padding": 22,
+              "fillColor": "#DFF5E5",
+              "borderColor": "#509863",
+              "borderWidth": 2,
+              "borderRadius": 8,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "agent_title",
+                  "width": "fill-container",
+                  "height": "fit-content",
+                  "text": "Agent 侧：结构化理解和行动",
+                  "fontSize": 20,
+                  "textColor": "#1F2329",
+                  "textAlign": "center"
+                },
+                {
+                  "type": "rect",
+                  "id": "agent_understand",
+                  "width": "fill-container",
+                  "height": "fit-content",
+                  "text": "理解结构\n识别流程、架构、因果、依赖",
+                  "fillColor": "#FFFFFF",
+                  "borderColor": "#509863",
+                  "borderWidth": 2,
+                  "borderRadius": 8,
+                  "fontSize": 14,
+                  "textColor": "#1F2329",
+                  "textAlign": "center",
+                  "verticalAlign": "middle"
+                },
+                {
+                  "type": "rect",
+                  "id": "agent_reason",
+                  "width": "fill-container",
+                  "height": "fit-content",
+                  "text": "推理补全\n找缺口、标风险、重组层级",
+                  "fillColor": "#FFFFFF",
+                  "borderColor": "#509863",
+                  "borderWidth": 2,
+                  "borderRadius": 8,
+                  "fontSize": 14,
+                  "textColor": "#1F2329",
+                  "textAlign": "center",
+                  "verticalAlign": "middle"
+                },
+                {
+                  "type": "rect",
+                  "id": "agent_execute",
+                  "width": "fill-container",
+                  "height": "fit-content",
+                  "text": "产出行动\n生成 PRD、任务、代码、自动化",
+                  "fillColor": "#FFFFFF",
+                  "borderColor": "#509863",
+                  "borderWidth": 2,
+                  "borderRadius": 8,
+                  "fontSize": 14,
+                  "textColor": "#1F2329",
+                  "textAlign": "center",
+                  "verticalAlign": "middle"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "bottom_insight",
+          "width": "fill-container",
+          "height": "fit-content",
+          "layout": "vertical",
+          "gap": 8,
+          "padding": 18,
+          "fillColor": "#FEF1CE",
+          "borderColor": "#D4B45B",
+          "borderWidth": 2,
+          "borderRadius": 8,
+          "children": [
+            {
+              "type": "text",
+              "id": "insight_title",
+              "width": "fill-container",
+              "height": "fit-content",
+              "text": "产品机会",
+              "fontSize": 18,
+              "textColor": "#1F2329",
+              "textAlign": "center"
+            },
+            {
+              "type": "text",
+              "id": "insight_text",
+              "width": "fill-container",
+              "height": "fit-content",
+              "text": "用户不需要学习 DSL；产品要做的是把说话、画图、拖拽编辑都翻译成同一个结构化对象，让人和 Agent 围绕同一个对象持续协作。",
+              "fontSize": 14,
+              "textColor": "#1F2329",
+              "textAlign": "center"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "connector",
+      "id": "c_human_dsl",
+      "connector": {
+        "from": "whiteboard_sketch",
+        "to": "dsl_schema",
+        "fromAnchor": "right",
+        "toAnchor": "left",
+        "lineShape": "curve",
+        "lineColor": "#BBBFC4",
+        "lineWidth": 2,
+        "endArrow": "arrow"
+      }
+    },
+    {
+      "type": "connector",
+      "id": "c_dsl_agent",
+      "connector": {
+        "from": "dsl_schema",
+        "to": "agent_understand",
+        "fromAnchor": "right",
+        "toAnchor": "left",
+        "lineShape": "curve",
+        "lineColor": "#BBBFC4",
+        "lineWidth": 2,
+        "endArrow": "arrow"
+      }
+    },
+    {
+      "type": "connector",
+      "id": "c_agent_dsl",
+      "connector": {
+        "from": "agent_reason",
+        "to": "dsl_transform",
+        "fromAnchor": "left",
+        "toAnchor": "right",
+        "lineShape": "curve",
+        "lineColor": "#BBBFC4",
+        "lineWidth": 2,
+        "lineStyle": "dashed",
+        "endArrow": "arrow"
+      }
+    },
+    {
+      "type": "connector",
+      "id": "c_dsl_human",
+      "connector": {
+        "from": "dsl_transform",
+        "to": "human_feedback",
+        "fromAnchor": "left",
+        "toAnchor": "right",
+        "lineShape": "curve",
+        "lineColor": "#BBBFC4",
+        "lineWidth": 2,
+        "lineStyle": "dashed",
+        "endArrow": "arrow"
+      }
+    }
+  ]
+}
