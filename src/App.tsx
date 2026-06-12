@@ -36,6 +36,15 @@ function makeNodeId(): string {
   return `node_${Date.now()}_${Math.random().toString(16).slice(4)}`;
 }
 
+function SettingsIcon() {
+  return (
+    <svg className="settings-icon" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 8.25a3.75 3.75 0 1 0 0 7.5 3.75 3.75 0 0 0 0-7.5Z" />
+      <path d="M19.43 13.48c.04-.32.07-.65.07-.98s-.02-.66-.07-.98l2.05-1.6-1.94-3.36-2.42.97a7.76 7.76 0 0 0-1.7-.98L15.05 4h-3.88l-.37 2.55c-.6.24-1.17.57-1.7.98l-2.42-.97-1.94 3.36 2.05 1.6c-.04.32-.07.65-.07.98s.02.66.07.98l-2.05 1.6 1.94 3.36 2.42-.97c.53.41 1.1.74 1.7.98l.37 2.55h3.88l.37-2.55c.6-.24 1.17-.57 1.7-.98l2.42.97 1.94-3.36-2.05-1.6Z" />
+    </svg>
+  );
+}
+
 export default function App() {
   // ── Board sessions ──
   const {
@@ -374,6 +383,9 @@ export default function App() {
         </div>
 
         <div className="topbar-actions">
+          <span className="agent-status-pill" title={`当前 AI: ${providerName}`}>
+            AI · {providerName}
+          </span>
           <button
             type="button"
             className={isActivityOpen ? 'active' : ''}
@@ -381,8 +393,14 @@ export default function App() {
           >
             活动{activities.length > 0 ? ` (${activities.length})` : ''}
           </button>
-          <button type="button" className="ghost small config-btn" onClick={() => setShowConfig(true)} title="Agent 设置">
-            ⚙
+          <button
+            type="button"
+            className="topbar-icon-btn"
+            onClick={() => setShowConfig(true)}
+            title="Agent 设置"
+            aria-label="Agent 设置"
+          >
+            <SettingsIcon />
           </button>
         </div>
       </header>
@@ -423,8 +441,6 @@ export default function App() {
             onInputChange={setInput}
             onSubmit={handleSubmit}
             isPending={isPending}
-            providerName={providerName}
-            onOpenConfig={() => setShowConfig(true)}
           />
         </section>
 
