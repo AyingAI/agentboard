@@ -35,27 +35,73 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toMatch(/BoardEdge/);
     expect(prompt).toMatch(/BoardGroup/);
     expect(prompt).toMatch(/dsl_patch/);
+    expect(prompt).toMatch(/interaction_request/);
   });
 
-  it('should include all 6 patch operation types', () => {
+  it('should include all patch operation types', () => {
     const prompt = buildSystemPrompt();
     expect(prompt).toMatch(/add_node/);
     expect(prompt).toMatch(/update_node/);
     expect(prompt).toMatch(/delete_node/);
     expect(prompt).toMatch(/add_edge/);
     expect(prompt).toMatch(/delete_edge/);
+    expect(prompt).toMatch(/add_group/);
+    expect(prompt).toMatch(/update_group/);
+    expect(prompt).toMatch(/delete_group/);
     expect(prompt).toMatch(/"layout"/);
+  });
+
+  it('should instruct the agent to choose non-flow structures when appropriate', () => {
+    const prompt = buildSystemPrompt();
+    expect(prompt).toMatch(/Do not default to a flowchart/);
+    expect(prompt).toMatch(/mindmap/);
+    expect(prompt).toMatch(/matrix/);
+    expect(prompt).toMatch(/cluster/);
+    expect(prompt).toMatch(/timeline/);
+    expect(prompt).toMatch(/swimlane/);
   });
 });
 
 describe('buildUserMessage', () => {
   it('should include the board JSON and user message', () => {
     const board = makeBoard(2);
-    const msg = buildUserMessage(board, 'add a risk note');
+    const msg = buildUserMessage(board, 'add a risk note', { runId: 'run_test' });
     expect(msg).toContain('Current board DSL');
     expect(msg).toContain('"n0"');
     expect(msg).toContain('"n1"');
     expect(msg).toContain('add a risk note');
+    expect(msg).toContain('Run id: run_test');
+  });
+
+  it('should include run context when provided', () => {
+    const board = makeBoard(1);
+    const msg = buildUserMessage(board, 'continue', {
+      runId: 'run_context',
+      runContext: [{ type: 'user_decision', timestamp: 1, payload: { message: '授权搜索' } }],
+    });
+    expect(msg).toContain('Run context events');
+    expect(msg).toContain('授权搜索');
+  });
+
+  it('should include recent human edit events when provided', () => {
+    const board = makeBoard(1);
+    const msg = buildUserMessage(board, 'continue from my edits', {
+      runId: 'run_edits',
+      recentEditEvents: [
+        {
+          id: 'edit_1',
+          type: 'node_moved',
+          timestamp: 123,
+          nodeId: 'n0',
+          summary: '移动节点 n0',
+          details: { from: { x: 100, y: 100 }, to: { x: 180, y: 160 } },
+        },
+      ],
+    });
+
+    expect(msg).toContain('Recent human edit events');
+    expect(msg).toContain('node_moved');
+    expect(msg).toContain('移动节点 n0');
   });
 
   it('should not modify the original board', () => {

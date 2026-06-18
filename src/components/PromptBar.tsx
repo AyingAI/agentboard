@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 interface PromptBarProps {
   input: string;
   onInputChange: (value: string) => void;
   onSubmit: () => void;
+  onCancel?: () => void;
   isPending: boolean;
 }
 
@@ -11,9 +12,11 @@ export default function PromptBar({
   input,
   onInputChange,
   onSubmit,
+  onCancel,
   isPending,
 }: PromptBarProps) {
   const [elapsed, setElapsed] = useState(0);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     if (!isPending) {
@@ -27,6 +30,14 @@ export default function PromptBar({
     return () => clearInterval(timer);
   }, [isPending]);
 
+  useLayoutEffect(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+
+    textarea.style.height = 'auto';
+    textarea.style.height = `${Math.min(textarea.scrollHeight, 140)}px`;
+  }, [input]);
+
   return (
     <div className={`composer-wrapper${isPending ? ' pending' : ''}`}>
       <form
@@ -36,23 +47,37 @@ export default function PromptBar({
           if (!isPending) onSubmit();
         }}
       >
-        <input
+        <textarea
+          ref={textareaRef}
           value={input}
           onChange={(event) => onInputChange(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return;
+            event.preventDefault();
+            if (!isPending && input.trim()) onSubmit();
+          }}
           placeholder="向 Agent 描述你的想法…"
           disabled={isPending}
+          rows={1}
         />
         <div className="prompt-bar-right">
-          <button type="submit" disabled={!input.trim() || isPending}>
-            {isPending ? (
+          {isPending ? (
+            <button
+              type="button"
+              className="stop-button"
+              onClick={() => onCancel?.()}
+              title="停止当前请求"
+            >
               <span className="pending-indicator">
                 <span className="dot-pulse" />
-                {elapsed > 0 ? ` ${elapsed}s` : ' …'}
+                停止{elapsed > 0 ? ` ${elapsed}s` : ''}
               </span>
-            ) : (
-              '发送'
-            )}
-          </button>
+            </button>
+          ) : (
+            <button type="submit" disabled={!input.trim()}>
+              发送
+            </button>
+          )}
         </div>
       </form>
     </div>

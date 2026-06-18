@@ -19,9 +19,14 @@ export default function InspectorPanel({
     <aside className="inspector-panel">
       <div className="inspector-header">
         <h1>DSL Inspector</h1>
-        <button type="button" onClick={onCopy}>
-          复制
-        </button>
+        <div className="inspector-actions">
+          <button type="button" onClick={onCopy}>
+            复制
+          </button>
+          <button type="button" onClick={onClose} title="关闭 DSL 调试面板">
+            ✕
+          </button>
+        </div>
       </div>
 
       <section>

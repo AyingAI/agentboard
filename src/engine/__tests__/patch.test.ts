@@ -195,6 +195,57 @@ describe('applyPatch — success cases', () => {
     expect(new Set(xValues).size).toBeGreaterThanOrEqual(1);
   });
 
+  it('layout: should support non-flow structure layouts', () => {
+    const board = minimalBoard({
+      nodes: [
+        newNode('n1'),
+        newNode('n2'),
+        newNode('n3'),
+        newNode('n4'),
+      ],
+      edges: [
+        { id: 'e1', from: 'n1', to: 'n2', type: 'line' },
+        { id: 'e2', from: 'n1', to: 'n3', type: 'line' },
+      ],
+      groups: [],
+    });
+
+    for (const algorithm of ['mindmap', 'matrix', 'cluster', 'timeline', 'swimlane'] as const) {
+      const { board: resultBoard, result } = applyPatch(board, {
+        type: 'dsl_patch',
+        summary: `${algorithm} layout`,
+        ops: [{ op: 'layout', algorithm }],
+      });
+
+      expect(result.applied).toBe(true);
+      expect(resultBoard.nodes).toHaveLength(4);
+      expect(new Set(resultBoard.nodes.map((node) => `${node.x},${node.y}`)).size).toBe(4);
+    }
+  });
+
+  it('should separate overlapping generated nodes after add_node', () => {
+    const board = minimalBoard({ nodes: [], edges: [] });
+    const patch: DSLPatch = {
+      type: 'dsl_patch',
+      summary: 'add overlapping nodes',
+      ops: [
+        { op: 'add_node', node: newNode('n1', { x: 120, y: 120, width: 240, height: 120 }) },
+        { op: 'add_node', node: newNode('n2', { x: 120, y: 120, width: 240, height: 120 }) },
+      ],
+    };
+
+    const { board: resultBoard, result } = applyPatch(board, patch);
+    const [a, b] = resultBoard.nodes;
+    const overlap =
+      a.x < b.x + b.width &&
+      a.x + a.width > b.x &&
+      a.y < b.y + b.height &&
+      a.y + a.height > b.y;
+
+    expect(result.applied).toBe(true);
+    expect(overlap).toBe(false);
+  });
+
   it('layout: should default to horizontal when no algorithm specified', () => {
     const board = minimalBoard();
     const patch: DSLPatch = {
@@ -364,6 +415,158 @@ describe('applyPatch — failure protection', () => {
     expect(result.errors).toHaveLength(1);
     expect(result.errors[0].code).toBe('NODE_INVALID_TYPE');
     expect(resultBoard).toBe(board);
+  });
+});
+
+// ── Group operation tests ──
+
+describe('applyPatch — group operations', () => {
+  it('add_group: should add a group with valid node refs', () => {
+    const board = minimalBoard();
+    const patch: DSLPatch = {
+      type: 'dsl_patch',
+      summary: 'add group',
+      ops: [{ op: 'add_group', group: { id: 'g1', title: 'Group A', nodeIds: ['n1', 'n2'] } }],
+    };
+
+    const { board: resultBoard, result } = applyPatch(board, patch);
+
+    expect(result.applied).toBe(true);
+    expect(result.appliedOps).toBe(1);
+    expect(resultBoard.groups).toHaveLength(1);
+    expect(resultBoard.groups[0].id).toBe('g1');
+    expect(resultBoard.groups[0].nodeIds).toEqual(['n1', 'n2']);
+  });
+
+  it('update_group: should update title, nodeIds, and style', () => {
+    const board = minimalBoard({
+      groups: [{ id: 'g1', title: 'Old Title', nodeIds: ['n1'] }],
+    });
+    const patch: DSLPatch = {
+      type: 'dsl_patch',
+      summary: 'update group',
+      ops: [
+        {
+          op: 'update_group',
+          groupId: 'g1',
+          changes: { title: 'New Title', nodeIds: ['n1', 'n2'], style: { fill: '#eee' } },
+        },
+      ],
+    };
+
+    const { board: resultBoard, result } = applyPatch(board, patch);
+
+    expect(result.applied).toBe(true);
+    expect(result.appliedOps).toBe(1);
+    const updated = resultBoard.groups[0];
+    expect(updated.title).toBe('New Title');
+    expect(updated.nodeIds).toEqual(['n1', 'n2']);
+    expect(updated.style).toEqual({ fill: '#eee' });
+  });
+
+  it('delete_group: should remove group but keep nodes', () => {
+    const board = minimalBoard({
+      groups: [{ id: 'g1', title: 'Group A', nodeIds: ['n1', 'n2'] }],
+    });
+    const patch: DSLPatch = {
+      type: 'dsl_patch',
+      summary: 'delete group',
+      ops: [{ op: 'delete_group', groupId: 'g1' }],
+    };
+
+    const { board: resultBoard, result } = applyPatch(board, patch);
+
+    expect(result.applied).toBe(true);
+    expect(result.appliedOps).toBe(1);
+    expect(resultBoard.groups).toHaveLength(0);
+    // Nodes are untouched
+    expect(resultBoard.nodes).toHaveLength(2);
+    expect(resultBoard.nodes.find((n) => n.id === 'n1')).toBeDefined();
+    expect(resultBoard.nodes.find((n) => n.id === 'n2')).toBeDefined();
+  });
+
+  it('add_group: should reject duplicate group id', () => {
+    const board = minimalBoard({
+      groups: [{ id: 'g1', title: 'Existing', nodeIds: ['n1'] }],
+    });
+    const patch: DSLPatch = {
+      type: 'dsl_patch',
+      summary: 'add duplicate group',
+      ops: [{ op: 'add_group', group: { id: 'g1', title: 'Dup', nodeIds: ['n2'] } }],
+    };
+
+    const { board: resultBoard, result } = applyPatch(board, patch);
+
+    expect(result.applied).toBe(false);
+    expect(result.appliedOps).toBe(0);
+    expect(result.errors.some((e) => e.code === 'PATCH_DUPLICATE_GROUP')).toBe(true);
+    expect(resultBoard).toBe(board);
+  });
+
+  it('add_group: should reject invalid node ref', () => {
+    const board = minimalBoard();
+    const patch: DSLPatch = {
+      type: 'dsl_patch',
+      summary: 'add group with bad ref',
+      ops: [{ op: 'add_group', group: { id: 'g1', title: 'Bad', nodeIds: ['n_ghost'] } }],
+    };
+
+    const { board: resultBoard, result } = applyPatch(board, patch);
+
+    expect(result.applied).toBe(false);
+    expect(result.appliedOps).toBe(0);
+    expect(result.errors.some((e) => e.code === 'GROUP_INVALID_REF')).toBe(true);
+    expect(resultBoard).toBe(board);
+  });
+
+  it('update_group: should reject missing group', () => {
+    const board = minimalBoard();
+    const patch: DSLPatch = {
+      type: 'dsl_patch',
+      summary: 'update missing group',
+      ops: [{ op: 'update_group', groupId: 'g_ghost', changes: { title: 'X' } }],
+    };
+
+    const { board: resultBoard, result } = applyPatch(board, patch);
+
+    expect(result.applied).toBe(false);
+    expect(result.errors.some((e) => e.code === 'PATCH_GROUP_NOT_FOUND')).toBe(true);
+    expect(resultBoard).toBe(board);
+  });
+
+  it('delete_group: should reject missing group', () => {
+    const board = minimalBoard();
+    const patch: DSLPatch = {
+      type: 'dsl_patch',
+      summary: 'delete missing group',
+      ops: [{ op: 'delete_group', groupId: 'g_ghost' }],
+    };
+
+    const { board: resultBoard, result } = applyPatch(board, patch);
+
+    expect(result.applied).toBe(false);
+    expect(result.errors.some((e) => e.code === 'PATCH_GROUP_NOT_FOUND')).toBe(true);
+    expect(resultBoard).toBe(board);
+  });
+
+  it('atomicity: valid add_group followed by invalid op rolls back entirely', () => {
+    const board = minimalBoard();
+    const patch: DSLPatch = {
+      type: 'dsl_patch',
+      summary: 'add group then fail',
+      ops: [
+        { op: 'add_group', group: { id: 'g1', title: 'Group A', nodeIds: ['n1', 'n2'] } }, // valid
+        { op: 'delete_group', groupId: 'g_ghost' }, // invalid — group doesn't exist
+      ],
+    };
+
+    const { board: resultBoard, result } = applyPatch(board, patch);
+
+    expect(result.applied).toBe(false);
+    expect(result.appliedOps).toBe(0);
+    // Original board reference returned, no group added
+    expect(resultBoard).toBe(board);
+    expect(resultBoard.groups).toHaveLength(0);
   });
 });
 

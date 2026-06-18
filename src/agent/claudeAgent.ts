@@ -1,48 +1,10 @@
-import type { DSLPatch } from '../types/dsl';
 import type { AgentAdapter, AgentConfig, AgentError, AgentRequest } from './types';
 import { buildSystemPrompt, buildUserMessage } from './prompts';
+import { fallbackInteractionFromText, parseAgentResponse } from './response';
+import { DEFAULT_TIMEOUT_MS, mapAbortError, withTimeout } from './resilience';
 
 const ANTHROPIC_API = 'https://api.anthropic.com/v1/messages';
 const ANTHROPIC_VERSION = '2023-06-01';
-
-/** Extract JSON from a string that may contain markdown code fences */
-function extractJson(text: string): string {
-  // Try fenced block first
-  const fenceMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/);
-  if (fenceMatch) return fenceMatch[1].trim();
-
-  // Try raw JSON (first { to last })
-  const start = text.indexOf('{');
-  const end = text.lastIndexOf('}');
-  if (start !== -1 && end !== -1 && end > start) {
-    return text.slice(start, end + 1);
-  }
-
-  return text;
-}
-
-/** Validate that a parsed object looks like a DSLPatch */
-function assertIsDSLPatch(obj: unknown): DSLPatch {
-  if (!obj || typeof obj !== 'object') {
-    throw new Error('Response is not a JSON object');
-  }
-  const patch = obj as Record<string, unknown>;
-  if (patch.type !== 'dsl_patch') {
-    throw new Error(`Missing or invalid "type" field: expected "dsl_patch", got "${String(patch.type)}"`);
-  }
-  if (typeof patch.summary !== 'string') {
-    throw new Error('Missing or invalid "summary" field');
-  }
-  if (!Array.isArray(patch.ops)) {
-    throw new Error('Missing or invalid "ops" array');
-  }
-  return {
-    type: 'dsl_patch',
-    summary: patch.summary as string,
-    ops: patch.ops as DSLPatch['ops'],
-    questions: Array.isArray(patch.questions) ? (patch.questions as string[]) : [],
-  };
-}
 
 /** Claude API adapter via browser fetch */
 export class ClaudeAgentAdapter implements AgentAdapter {
@@ -52,7 +14,7 @@ export class ClaudeAgentAdapter implements AgentAdapter {
     this.name = `Claude (${config.model || 'opus'})`;
   }
 
-  async generatePatch(request: AgentRequest): Promise<DSLPatch> {
+  async generateResponse(request: AgentRequest) {
     if (!this.config.apiKey) {
       throw {
         code: 'AUTH_ERROR',
@@ -61,9 +23,14 @@ export class ClaudeAgentAdapter implements AgentAdapter {
     }
 
     const systemPrompt = buildSystemPrompt();
-    const userMessage = buildUserMessage(request.boardState, request.userMessage);
+    const userMessage = buildUserMessage(request.boardState, request.userMessage, {
+      runId: request.runId,
+      runContext: request.runContext,
+      recentEditEvents: request.recentEditEvents,
+    });
 
     let response: Response;
+    const { signal, cleanup } = withTimeout(request.signal, DEFAULT_TIMEOUT_MS);
     try {
       response = await fetch(ANTHROPIC_API, {
         method: 'POST',
@@ -79,12 +46,12 @@ export class ClaudeAgentAdapter implements AgentAdapter {
           system: systemPrompt,
           messages: [{ role: 'user', content: userMessage }],
         }),
+        signal,
       });
     } catch {
-      throw {
-        code: 'NETWORK_ERROR',
-        message: '网络请求失败，请检查网络连接后重试。',
-      } satisfies AgentError;
+      throw mapAbortError(signal, '网络请求失败，请检查网络连接后重试。');
+    } finally {
+      cleanup();
     }
 
     if (!response.ok) {
@@ -131,15 +98,14 @@ export class ClaudeAgentAdapter implements AgentAdapter {
       } satisfies AgentError;
     }
 
-    // Extract and validate JSON from the response text
     try {
-      const jsonStr = extractJson(text);
-      const parsed = JSON.parse(jsonStr) as unknown;
-      return assertIsDSLPatch(parsed);
+      return parseAgentResponse(text);
     } catch (err) {
+      const interaction = fallbackInteractionFromText(text, request.runId ?? `run_${Date.now()}`);
+      if (interaction) return interaction;
       throw {
         code: 'PARSE_ERROR',
-        message: `Agent 返回的内容不是合法的 DSLPatch JSON：${err instanceof Error ? err.message : String(err)}`,
+        message: `Agent 返回的内容不是合法的 AgentBoard 响应 JSON：${err instanceof Error ? err.message : String(err)}`,
         rawText: text.slice(0, 2000),
       } satisfies AgentError;
     }

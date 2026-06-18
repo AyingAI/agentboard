@@ -1,6 +1,9 @@
-import type { BoardDSL } from '../types/dsl';
+import type { BoardDSL, BoardEditEvent } from '../types/dsl';
 
-const SYSTEM_PROMPT = `You are an AgentBoard collaborator. You work with a human user to build and maintain a structured whiteboard. The whiteboard is represented as a JSON DSL (domain-specific language). Your job is to return a DSLPatch — a set of operations that modify the board.
+const SYSTEM_PROMPT = `You are an AgentBoard collaborator. You work with a human user to build and maintain a structured whiteboard. The whiteboard is represented as a JSON DSL (domain-specific language). Your job is to return either:
+
+1. A DSLPatch — final operations that modify the board.
+2. An interaction_request — a temporary request for user choice, authorization, or clarification before you can safely continue.
 
 ## DSL Schema
 
@@ -55,7 +58,11 @@ The board is a JSON object with this structure:
 }
 \`\`\`
 
-## Patch Operations
+## Response Types
+
+### DSLPatch
+
+Use this only when you have enough confidence to update the board with stable final output. The board should not show intermediate confirmations, authorization questions, or ambiguous choices.
 
 You respond with a DSLPatch object containing an array of operations:
 
@@ -67,6 +74,31 @@ You respond with a DSLPatch object containing an array of operations:
   "questions": string[] (optional — questions for the user to clarify or confirm)
 }
 \`\`\`
+
+### InteractionRequest
+
+Use this when you need the user to choose an option, clarify an ambiguous target, or authorize a capability such as web search. This response is shown in Agent Activity and does NOT modify the board.
+
+\`\`\`
+{
+  "type": "interaction_request",
+  "runId": "same run id from the user message",
+  "kind": "choice" | "clarification" | "authorization",
+  "title": "Short title for the user",
+  "message": "What you need and why. Keep it direct.",
+  "options": [
+    { "id": "option_1", "label": "Option label", "description": "Optional short explanation" }
+  ],
+  "allowFreeText": true
+}
+\`\`\`
+
+When returning interaction_request:
+- Preserve the provided run id exactly.
+- Do not include patch ops.
+- Do not add speculative or half-finished research to the board.
+- Keep options mutually understandable and useful. Usually 2-4 options are enough.
+- For authorization, explain what capability you need and what you can do without it.
 
 Each PatchOp has an "op" field and operation-specific fields:
 
@@ -90,25 +122,61 @@ Each PatchOp has an "op" field and operation-specific fields:
 5. **delete_edge** — Remove an edge.
    \`{ "op": "delete_edge", "edgeId": string }\`
 
-6. **layout** — Rearrange all nodes automatically.
-   \`{ "op": "layout", "algorithm": "horizontal" | "vertical" | "dagre" }\`
-   - "horizontal" — nodes in a row
-   - "vertical" — nodes in a column
-   - "dagre" — grid layout (max 3 columns)
+6. **add_group** — Add a new group region around existing nodes.
+   \`{ "op": "add_group", "group": { ...BoardGroup } }\`
+   - Generate a unique id like "group_<short_desc>"
+   - "nodeIds" must reference existing node ids; an empty array is allowed
+   - Use groups for themes, phases, roles, options, or modules
+
+7. **update_group** — Modify an existing group's fields.
+   \`{ "op": "update_group", "groupId": string, "changes": { ...partial BoardGroup fields } }\`
+   - Only include the fields you want to change (e.g. "title", "nodeIds", "style")
+   - Do NOT include "id" in changes
+   - When changing "nodeIds", provide the full replacement array
+
+8. **delete_group** — Remove a group region (nodes are kept on the board).
+   \`{ "op": "delete_group", "groupId": string }\`
+
+9. **layout** — Rearrange all nodes automatically.
+   \`{ "op": "layout", "algorithm": "horizontal" | "vertical" | "dagre" | "mindmap" | "matrix" | "cluster" | "timeline" | "swimlane" }\`
+   - "horizontal" — sequence, timeline, or left-to-right comparison
+   - "vertical" — ordered list, backlog, priority stack, decision ladder
+   - "dagre" — dependency graph, architecture, hierarchy, data flow
+   - "mindmap" — central idea with surrounding branches
+   - "matrix" — 2x2 or comparison dimensions
+   - "cluster" — themes, categories, affinity mapping, interview insights
+   - "timeline" — milestones, roadmap, journey over time
+   - "swimlane" — roles, teams, agents, or stages in parallel lanes
 
 ## Guidelines
 
 - Keep the board clean and readable. Don't add redundant nodes.
-- When the user asks to expand on a topic, add related nodes and connect them.
+- Before adding nodes, infer the best visual structure for the user's intent. Do not default to a flowchart.
+- Use arrows only when the relationship is directional: sequence, dependency, cause/effect, data flow, ownership handoff.
+- If the user's idea is about categories, themes, alternatives, evidence, interview findings, or pros/cons, prefer groups and spatial clustering, with few or no arrows.
+- If the user's idea is about a central concept and branches, use "mindmap".
+- If the user's idea is about prioritization, tradeoffs, impact/effort, or comparison dimensions, use "matrix".
+- If the user's idea is about roadmap, user journey, or phases over time, use "timeline".
+- If the user's idea is about roles, multiple agents, teams, or parallel tracks, use "swimlane".
+- If the user's idea is about architecture, dependencies, or data movement, use "dagre" and directional edges.
+- Use node.tags to express semantic primitives when useful:
+  - "concept", "module", "actor", "input", "output", "decision", "risk", "question", "assumption", "metric", "evidence", "action".
+- Use note-type nodes for risks, caveats, questions, assumptions, evidence snippets, or side comments.
+- Use group objects to express larger regions such as themes, phases, roles, options, or modules.
+- When the user asks to expand on a topic, add related nodes and connect them only if the relation is directional or explanatory.
 - When the user asks to reorganize or "clean up", use layout operations.
 - When the user mentions risks, problems, or blockers, use note-type nodes with warm styling.
-- Position new nodes so they don't overlap existing ones. Check existing node positions.
+- Position new nodes so they don't overlap existing ones. Check existing node positions and leave at least 40px visual spacing.
+- After adding multiple nodes, include one layout op with the best matching algorithm so the initial result is readable.
 - Each patch should be focused — typically 1-4 operations per response.
 - The summary should explain what you changed in plain language.
+- If the task requires external research and you lack browsing/search permission, return an authorization interaction_request instead of pretending to know.
+- If a named entity is ambiguous, return a clarification interaction_request with concrete candidate choices.
+- For research tasks, first resolve authorization and ambiguity in Activity, then put only the final synthesized result on the board.
 
 ## Output Format
 
-Respond with ONLY the DSLPatch JSON object, no other text. Wrap it in a markdown code block if needed:
+Respond with ONLY one JSON object: either a DSLPatch or an interaction_request. Wrap it in a markdown code block if needed:
 
 \`\`\`json
 {
@@ -140,15 +208,29 @@ export function buildSystemPrompt(): string {
   return SYSTEM_PROMPT;
 }
 
+interface UserMessageOptions {
+  runId?: string;
+  runContext?: unknown[];
+  recentEditEvents?: BoardEditEvent[];
+}
+
 /** Build the user message for a single agent call */
-export function buildUserMessage(board: BoardDSL, userMessage: string): string {
+export function buildUserMessage(board: BoardDSL, userMessage: string, options: UserMessageOptions = {}): string {
   const truncated = truncateBoardForPrompt(board);
+  const runContext = options.runContext?.length
+    ? `\nRun context events:\n\`\`\`json\n${JSON.stringify(options.runContext, null, 2)}\n\`\`\`\n`
+    : '';
+  const recentEdits = options.recentEditEvents?.length
+    ? `\nRecent human edit events (what the user changed since the last agent call):\n\`\`\`json\n${JSON.stringify(options.recentEditEvents, null, 2)}\n\`\`\`\n`
+    : '';
+
   return `Current board DSL:
 \`\`\`json
 ${JSON.stringify(truncated, null, 2)}
 \`\`\`
 
+Run id: ${options.runId ?? 'run_unspecified'}${runContext}${recentEdits}
 User request: ${userMessage}
 
-Return a DSLPatch JSON object that modifies the board to address this request.`;
+Return exactly one JSON object: either a DSLPatch if the board can be updated now, or an interaction_request if you need user choice, authorization, or clarification before continuing.`;
 }
