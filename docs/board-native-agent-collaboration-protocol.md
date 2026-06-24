@@ -183,6 +183,57 @@ proposal 必须回答四个问题：
 - 为什么这样改。
 - 影响哪些节点或区域。
 
+### FlowRun
+
+FlowRun 是“画板流程被触发执行”的运行对象。
+
+它和 proposal 的区别是：
+
+- proposal 是候选变更，等待 owner 决定是否合并。
+- FlowRun 是一次基于当前画板流程的执行过程，会产生状态、日志、用户确认请求和结果回写。
+
+第一版不需要新增工作流编辑器。用户仍然用节点和连线画流程，然后在对话框输入“执行流程”等自然语言命令。AgentBoard 负责把当前 `BoardDSL` 解释成可执行计划。
+
+```ts
+interface FlowRun {
+  type: 'flow_run';
+  runId: string;
+  boardId: string;
+  baseRevision: number;
+  sourceNodeIds: string[];
+  objective: string;
+  status: 'draft' | 'needs_input' | 'running' | 'completed' | 'failed' | 'cancelled';
+  steps: FlowStep[];
+  constraints?: string[];
+  acceptanceCriteria?: string[];
+  createdAt: number;
+  updatedAt: number;
+}
+
+interface FlowStep {
+  stepId: string;
+  nodeId: string;
+  title: string;
+  role: 'instruction' | 'task' | 'decision' | 'checkpoint' | 'output';
+  dependsOn: string[];
+  prompt: string;
+  status: 'pending' | 'running' | 'needs_input' | 'completed' | 'failed' | 'skipped';
+  resultNodeIds?: string[];
+  resultSummary?: string;
+}
+```
+
+FlowRun 必须回答六个问题：
+
+- 这次执行的目标是什么。
+- 哪些节点属于本次流程。
+- 执行顺序和依赖是什么。
+- 每个节点在流程中承担什么角色。
+- 哪些步骤需要用户补充、确认或授权。
+- 执行结果如何回写到 main board。
+
+如果无法回答这些问题，Agent 不应直接执行，应先返回 `interaction_request`。
+
 ### Merge
 
 merge 是把 proposal 沉淀到 main board 的动作。
@@ -281,7 +332,65 @@ merge 时：
 - layout 操作：影响全局，默认不自动合并。
 - 修改 board title / metadata / group：需要冲突判断。
 
-## 8. API 草案
+## 8. 画板流程执行协议
+
+画板流程执行不新增默认 UI 入口。触发方式优先保持自然语言：
+
+```text
+执行流程
+执行这条流程
+从「搜索资料」节点开始执行
+按这组节点跑一遍
+```
+
+Agent 收到这类命令时，处理顺序是：
+
+1. 读取当前 `BoardDSL`。
+2. 找出候选流程：有向连线、同一 group 内节点、最近选中/编辑节点附近的连通子图。
+3. 判断是否存在唯一明确流程。
+4. 识别起点、终点、任务节点、说明节点、决策节点和输出节点。
+5. 判断缺失信息：目标、输入、输出标准、权限、需要人工确认的步骤。
+6. 如果信息不足，返回 `interaction_request`，让 owner 在确认浮窗中补充。
+7. 如果信息充分，生成 FlowRun draft 并请求 owner 确认。
+8. owner 确认后，Agent 顺序执行步骤。
+9. 每步结果通过 `DSLPatch` 回写到画板。
+
+确认浮窗应展示 Agent 解析出的计划，而不是只问“是否继续”：
+
+```text
+我理解的执行流程：
+
+1. 需求理解
+2. 搜索资料
+3. 提炼结论
+4. 生成方案
+5. 自检
+
+需要确认：
+- 是否允许联网搜索？
+- 最终产物是一份方案总结，还是每步都生成独立结果节点？
+- 自检维度是否按用户价值、商业价值、技术风险执行？
+```
+
+回写规则：
+
+- 不覆盖用户原始流程节点，除非用户明确要求修改。
+- 优先在相关步骤节点旁新增结果节点。
+- 风险用 `note` + `risk` tag。
+- 问题用 `note` + `question` tag。
+- 结论用 `card` + `output` tag。
+- 执行状态可以先写入节点正文或 tags，后续再升级为专门状态字段。
+- 默认不使用 `layout scope: "all"`，避免打乱用户原流程。
+
+MVP 边界：
+
+- 只支持当前 board 内的一条明确流程。
+- 不做循环、并行分支、条件表达式执行引擎。
+- 不做长期定时任务。
+- 不默认调用外部系统。
+- 需要联网、读文件、写代码、发送消息等能力时，必须通过确认浮窗授权。
+
+## 9. API 草案
 
 本地 MVP 可以先挂在 Vite dev server 上。
 
@@ -302,6 +411,10 @@ POST   /api/boards/:boardId/proposals/:proposalId/reject
 POST   /api/boards/:boardId/proposals/:proposalId/merge
 
 POST   /api/boards/:boardId/merge-proposals
+POST   /api/boards/:boardId/flow-runs
+GET    /api/boards/:boardId/flow-runs/:runId
+POST   /api/boards/:boardId/flow-runs/:runId/resume
+POST   /api/boards/:boardId/flow-runs/:runId/cancel
 DELETE /api/boards/:boardId/merge-lock
 DELETE /api/boards/:boardId
 ```
@@ -317,10 +430,14 @@ DELETE /api/boards/:boardId
 - `GET /api/boards/:boardId/proposals`：查看 proposal 列表。
 - `POST /api/boards/:boardId/proposals/:proposalId/merge`：owner 将 proposal merge 到 main board。
 - `POST /api/boards/:boardId/merge-proposals`：创建一个综合 proposal；通常由 coordinator 调用。
+- `POST /api/boards/:boardId/flow-runs`：基于当前 board 或指定节点集合创建流程执行。
+- `GET /api/boards/:boardId/flow-runs/:runId`：读取流程执行状态、步骤结果和待确认事项。
+- `POST /api/boards/:boardId/flow-runs/:runId/resume`：提交用户补充、确认或授权后继续执行。
+- `POST /api/boards/:boardId/flow-runs/:runId/cancel`：取消正在执行的流程。
 - `DELETE /api/boards/:boardId/merge-lock`：owner 强制释放 merge lock。
 - `DELETE /api/boards/:boardId`：仅 owner 可删除 board。
 
-## 9. 响应格式
+## 10. 响应格式
 
 所有 API 响应都应包含明确的下一步建议，降低外部 Agent 的决策成本。
 
@@ -413,7 +530,7 @@ proposal 过期响应：
 }
 ```
 
-## 10. board-specific skill.md 应包含什么
+## 11. board-specific skill.md 应包含什么
 
 `GET /api/boards/:boardId/skill.md` 应该是动态生成的，包含：
 
@@ -453,7 +570,7 @@ Quick start:
 4. Wait for owner/coordinator merge
 ```
 
-## 11. 本地 MVP 架构
+## 12. 本地 MVP 架构
 
 第一版可以用内存态服务，不引入数据库。
 
@@ -462,6 +579,7 @@ Vite dev server
   ├── boards: Map<boardId, MainBoardState>
   ├── workspaces: Map<workspaceId, AgentWorkspace>
   ├── proposals: Map<boardId, BoardProposal[]>
+  ├── flowRuns: Map<boardId, FlowRun[]>
   ├── mergeLocks: Map<boardId, MergeLock>
   └── events: Map<boardId, BoardEvent[]>
 ```
@@ -490,7 +608,7 @@ coordinator 工作模式：
 - 生成一个新的综合 proposal。
 - 不直接 merge，仍由 owner 决定。
 
-## 12. 排队机制的降级位置
+## 13. 排队机制的降级位置
 
 排队不是主协作范式，但仍有用。
 
@@ -509,7 +627,7 @@ coordinator 工作模式：
 
 **Agent 并行工作，proposal 并行提交，main board 串行 merge。**
 
-## 13. 待讨论问题
+## 14. 待讨论问题
 
 下面这些还不应写死为最终方案：
 

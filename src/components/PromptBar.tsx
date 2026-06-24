@@ -5,7 +5,10 @@ interface PromptBarProps {
   onInputChange: (value: string) => void;
   onSubmit: () => void;
   onCancel?: () => void;
+  onOpenConfig: () => void;
   isPending: boolean;
+  isAgentConfigured: boolean;
+  providerName: string;
 }
 
 export default function PromptBar({
@@ -13,7 +16,10 @@ export default function PromptBar({
   onInputChange,
   onSubmit,
   onCancel,
+  onOpenConfig,
   isPending,
+  isAgentConfigured,
+  providerName,
 }: PromptBarProps) {
   const [elapsed, setElapsed] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -56,7 +62,7 @@ export default function PromptBar({
             event.preventDefault();
             if (!isPending && input.trim()) onSubmit();
           }}
-          placeholder="向 Agent 描述你的想法…"
+          placeholder="向 Agent 描述你的想法，或输入“执行流程”…"
           disabled={isPending}
           rows={1}
         />
@@ -72,6 +78,15 @@ export default function PromptBar({
                 <span className="dot-pulse" />
                 停止{elapsed > 0 ? ` ${elapsed}s` : ''}
               </span>
+            </button>
+          ) : !isAgentConfigured ? (
+            <button
+              type="button"
+              className="configure-agent-button"
+              onClick={onOpenConfig}
+              title={`当前 AI: ${providerName}`}
+            >
+              配置 Agent
             </button>
           ) : (
             <button type="submit" disabled={!input.trim()}>

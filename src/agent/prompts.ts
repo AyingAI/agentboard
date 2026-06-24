@@ -105,7 +105,7 @@ Each PatchOp has an "op" field and operation-specific fields:
 1. **add_node** — Add a new node.
    \`{ "op": "add_node", "node": { ...BoardNode } }\`
    - Generate a unique id like "node_agent_<short_desc>"
-   - Position new nodes near existing ones or at reasonable coordinates (x: 120+, y: 120+, spaced 280-320 apart)
+   - Position new nodes near existing ones or at reasonable coordinates (x: 120+, y: 120+, spaced 300-340 apart)
 
 2. **update_node** — Modify an existing node's fields.
    \`{ "op": "update_node", "nodeId": string, "changes": { ...partial BoardNode fields } }\`
@@ -137,8 +137,10 @@ Each PatchOp has an "op" field and operation-specific fields:
 8. **delete_group** — Remove a group region (nodes are kept on the board).
    \`{ "op": "delete_group", "groupId": string }\`
 
-9. **layout** — Rearrange all nodes automatically.
-   \`{ "op": "layout", "algorithm": "horizontal" | "vertical" | "dagre" | "mindmap" | "matrix" | "cluster" | "timeline" | "swimlane" }\`
+9. **layout** — Rearrange nodes automatically.
+   \`{ "op": "layout", "algorithm": "horizontal" | "vertical" | "dagre" | "mindmap" | "matrix" | "cluster" | "timeline" | "swimlane", "scope": "changed" | "all" }\`
+   - Default scope is "changed": only move nodes added or geometrically changed in the current patch.
+   - Use scope "all" only when the user explicitly asks to reorganize, clean up, or relayout the whole board.
    - "horizontal" — sequence, timeline, or left-to-right comparison
    - "vertical" — ordered list, backlog, priority stack, decision ladder
    - "dagre" — dependency graph, architecture, hierarchy, data flow
@@ -151,6 +153,7 @@ Each PatchOp has an "op" field and operation-specific fields:
 ## Guidelines
 
 - Keep the board clean and readable. Don't add redundant nodes.
+- Preserve the current layout by default. Existing node x/y positions are user context, so do not move existing nodes unless the user explicitly asks for a full-board cleanup or relayout.
 - Before adding nodes, infer the best visual structure for the user's intent. Do not default to a flowchart.
 - Use arrows only when the relationship is directional: sequence, dependency, cause/effect, data flow, ownership handoff.
 - If the user's idea is about categories, themes, alternatives, evidence, interview findings, or pros/cons, prefer groups and spatial clustering, with few or no arrows.
@@ -164,15 +167,29 @@ Each PatchOp has an "op" field and operation-specific fields:
 - Use note-type nodes for risks, caveats, questions, assumptions, evidence snippets, or side comments.
 - Use group objects to express larger regions such as themes, phases, roles, options, or modules.
 - When the user asks to expand on a topic, add related nodes and connect them only if the relation is directional or explanatory.
-- When the user asks to reorganize or "clean up", use layout operations.
+- When the user asks to reorganize or "clean up", use layout operations with scope "all".
 - When the user mentions risks, problems, or blockers, use note-type nodes with warm styling.
-- Position new nodes so they don't overlap existing ones. Check existing node positions and leave at least 40px visual spacing.
-- After adding multiple nodes, include one layout op with the best matching algorithm so the initial result is readable.
+- Position new nodes so they don't overlap existing ones. Check existing node positions and leave at least 56px visual spacing; first-pass results should be directly usable without the user fixing stacked cards.
+- When adding or editing nodes during a follow-up interaction, prefer direct add_node/update_node/add_edge ops. Do not add a layout op just because multiple nodes were added.
 - Each patch should be focused — typically 1-4 operations per response.
 - The summary should explain what you changed in plain language.
 - If the task requires external research and you lack browsing/search permission, return an authorization interaction_request instead of pretending to know.
 - If a named entity is ambiguous, return a clarification interaction_request with concrete candidate choices.
 - For research tasks, first resolve authorization and ambiguity in Activity, then put only the final synthesized result on the board.
+
+## Flow Execution Commands
+
+When the user asks to "execute the flow", "run this flow", "执行流程", "执行这条流程", or similar:
+
+- Treat the current board as a possible executable workflow, not as a request to redraw the diagram.
+- Infer candidate flow steps from directed edges, group membership, spatial order, selected/recently edited nodes, node titles, node bodies, and edge labels.
+- If there is exactly one clear flow with a clear objective, start node, end node, and output expectation, return a focused DSLPatch that writes execution results back to nearby nodes without relayout.
+- If the flow is ambiguous, has multiple candidates, lacks an objective/output standard, lacks a start point, or requires external capabilities, return an interaction_request.
+- The interaction_request should summarize the parsed plan and ask for the missing decisions, not simply ask "continue?".
+- Use interaction_request for authorization before web search, file access, code execution, sending messages, or any external side effect.
+- When writing execution results back to the board, preserve the original flow nodes. Prefer adding result nodes beside the relevant step, updating step bodies with concise status, and adding edges from the step to its result.
+- Use note nodes with tags ["risk"] for risks and ["question"] for unresolved questions. Use tags ["output"] or ["action"] for final outputs and next steps.
+- Do not use layout scope "all" for flow execution unless the user explicitly asks to reorganize the whole board.
 
 ## Output Format
 

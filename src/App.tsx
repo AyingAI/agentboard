@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { BoardEditEvent, BoardNode } from './types/dsl';
+import type { BoardDSL, BoardEditEvent, BoardNode } from './types/dsl';
 import { useBoardSessions } from './hooks/useBoardSessions';
 import { useAgent } from './hooks/useAgent';
 import { useAgentConfig } from './hooks/useAgentConfig';
@@ -10,6 +10,7 @@ import BoardCanvas, { normalizeEdgeLabel } from './components/BoardCanvas';
 import PromptBar from './components/PromptBar';
 import ActivityPanel from './components/ActivityPanel';
 import AgentConfigPanel from './components/AgentConfig';
+import AgentRunOverlay from './components/AgentRunOverlay';
 
 type EditState = {
   nodeId: string;
@@ -20,12 +21,34 @@ type EdgeEditState = {
   edgeId: string;
 };
 
+const MAX_UNDO_HISTORY = 25;
+
 function makeActivityId() {
   return `activity_${Date.now()}_${Math.random().toString(16).slice(2)}`;
 }
 
 function makeNodeId(): string {
   return `node_${Date.now()}_${Math.random().toString(16).slice(4)}`;
+}
+
+function buildNodeDeepDivePrompt(node: BoardNode, request: string): string {
+  return [
+    '请基于当前选中的单个节点做深度研究和扩展，不要把整张白板重新生成或重排。',
+    '',
+    `目标节点 ID: ${node.id}`,
+    `目标节点标题: ${node.title}`,
+    `目标节点正文: ${node.body || '(空)'}`,
+    `目标节点标签: ${node.tags?.join(', ') || '(无)'}`,
+    '',
+    `我的深挖需求: ${request}`,
+    '',
+    '输出要求:',
+    '- 优先围绕这个目标节点新增 1-3 个高价值关联节点，必要时补充连线。',
+    '- 新增节点放在目标节点右侧或下方附近，保持原有白板布局稳定。',
+    '- 如果只是补充或修正目标节点内容，使用 update_node，不要重复创建同义节点。',
+    '- 除非我明确要求整理全图，否则不要使用 layout scope "all"。',
+    '- 如果信息不足，先提出关键问题、假设或待验证点，不要硬编。',
+  ].join('\n');
 }
 
 function SettingsIcon() {
@@ -56,9 +79,29 @@ export default function App() {
 
   // ── Agent config ──
   const { config, setApiKey, setModel, setProvider, setCliId, setBaseUrl } = useAgentConfig();
+  const isAgentConfigured =
+    (config.provider === 'local-cli' && Boolean(config.cliId)) ||
+    (config.provider === 'claude' && Boolean(config.apiKey)) ||
+    (config.provider === 'openai' && Boolean(config.apiKey));
 
   // ── Drag ──
   const getBoard = useCallback(() => board, [board]);
+  const [undoStack, setUndoStack] = useState<BoardDSL[]>([]);
+
+  const pushUndoSnapshot = useCallback((snapshot: BoardDSL) => {
+    setUndoStack((items) => [...items, structuredClone(snapshot)].slice(-MAX_UNDO_HISTORY));
+  }, []);
+
+  const updateBoardWithHistory = useCallback(
+    (nextBoard: BoardDSL) => {
+      const current = getBoard();
+      if (JSON.stringify(current) !== JSON.stringify(nextBoard)) {
+        pushUndoSnapshot(current);
+      }
+      updateActiveBoard(nextBoard);
+    },
+    [getBoard, pushUndoSnapshot, updateActiveBoard],
+  );
 
   // ── Canvas pan (Space + drag / middle button) ──
   const {
@@ -84,6 +127,19 @@ export default function App() {
 
   const getRecentEditEvents = useCallback(() => recentEditEvents, [recentEditEvents]);
   const clearRecentEditEvents = useCallback(() => setRecentEditEvents([]), []);
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
+  const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
+
+  const selectNodes = useCallback((nodeIds: string[], primaryNodeId: string | null = nodeIds[0] ?? null) => {
+    const uniqueNodeIds = Array.from(new Set(nodeIds));
+    const primary = primaryNodeId && uniqueNodeIds.includes(primaryNodeId)
+      ? primaryNodeId
+      : uniqueNodeIds[0] ?? null;
+    setSelectedNodeIds(uniqueNodeIds);
+    setSelectedNodeId(primary);
+  }, []);
+
   const agentOptions = useMemo(
     () => ({
       getRecentEditEvents,
@@ -103,12 +159,21 @@ export default function App() {
     updateActiveBoard,
     { panOffset, zoom },
     setPanOffset,
-    ({ nodeId, from, to }) => {
+    ({ nodeId, from, to, moves }) => {
+      const current = getBoard();
+      const moveMap = new Map(moves.map((move) => [move.nodeId, move]));
+      pushUndoSnapshot({
+        ...current,
+        nodes: current.nodes.map((node) => {
+          const move = moveMap.get(node.id);
+          return move ? { ...node, x: move.from.x, y: move.from.y } : node;
+        }),
+      });
       recordEditEvent({
         type: 'node_moved',
-        nodeId,
-        summary: `移动节点 ${nodeId}`,
-        details: { from, to },
+        nodeId: moves.length === 1 ? nodeId : undefined,
+        summary: moves.length === 1 ? `移动节点 ${nodeId}` : `移动 ${moves.length} 个节点`,
+        details: { from, to, moves },
       });
     },
   );
@@ -121,7 +186,7 @@ export default function App() {
     updateConnection,
     finishConnection,
     cancelConnection,
-  } = useEdgeCreation(getBoard, updateActiveBoard, boardRef);
+  } = useEdgeCreation(getBoard, updateBoardWithHistory, boardRef);
 
   const finishConnectionToNode = useCallback(
     (targetNodeId: string | null) => {
@@ -147,11 +212,11 @@ export default function App() {
             to: targetNodeId,
           },
         });
-        setSelectedNodeId(null);
+        selectNodes([]);
         setSelectedEdgeId(edgeId);
       }
     },
-    [board.edges, cancelConnection, connectingFrom, finishConnection, recordEditEvent],
+    [board.edges, cancelConnection, connectingFrom, finishConnection, recordEditEvent, selectNodes],
   );
 
   const findNodeIdAtClientPoint = useCallback((clientX: number, clientY: number) => {
@@ -193,28 +258,52 @@ export default function App() {
     cancel,
     addActivity,
     resetState: resetAgentState,
-  } = useAgent(getBoard, updateActiveBoard, config, agentOptions);
+  } = useAgent(getBoard, updateBoardWithHistory, config, agentOptions);
 
   // Reset in-memory agent state when session switches
   const prevActiveIdRef = useRef(activeId);
   useEffect(() => {
     if (prevActiveIdRef.current === activeId) return;
     prevActiveIdRef.current = activeId;
+    setUndoStack([]);
     resetAgentState(activeSession.activities ?? [], activeSession.runs ?? {});
   }, [activeId, activeSession, resetAgentState]);
 
   // ── UI state ──
-  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
-  const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const [input, setInput] = useState('');
   const [isActivityOpen, setActivityOpen] = useState(false);
   const [expandedActivityId, setExpandedActivityId] = useState<string | null>(null);
   const [editState, setEditState] = useState<EditState | null>(null);
   const [edgeEditState, setEdgeEditState] = useState<EdgeEditState | null>(null);
+  const [deepDiveNodeId, setDeepDiveNodeId] = useState<string | null>(null);
+  const [deepDiveInput, setDeepDiveInput] = useState('');
   const [showConfig, setShowConfig] = useState(false);
   const [showBoardMenu, setShowBoardMenu] = useState(false);
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState('');
+  const canUndo = undoStack.length > 0;
+  const runningActivity = useMemo(
+    () => activities.find((item) => item.kind === 'run_progress' && item.progressStatus === 'running') ?? null,
+    [activities],
+  );
+
+  function undoLastBoardChange() {
+    const previousBoard = undoStack[undoStack.length - 1];
+    if (!previousBoard) return;
+    updateActiveBoard(previousBoard);
+    setUndoStack((items) => items.slice(0, -1));
+    selectNodes([]);
+    setSelectedEdgeId(null);
+    setEditState(null);
+    setEdgeEditState(null);
+    setDeepDiveNodeId(null);
+    addActivity({
+      id: makeActivityId(),
+      timestamp: Date.now(),
+      kind: 'system',
+      summary: '已撤销上一步白板修改',
+    });
+  }
 
   // ── Keyboard shortcuts ──
   useEffect(() => {
@@ -223,23 +312,30 @@ export default function App() {
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
       if (editState || editingTitle || edgeEditState) return;
 
-      if ((event.key === 'Delete' || event.key === 'Backspace') && (selectedNodeId || selectedEdgeId)) {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z' && !event.shiftKey) {
         event.preventDefault();
-        if (selectedNodeId) deleteSelectedNode();
+        undoLastBoardChange();
+        return;
+      }
+
+      if ((event.key === 'Delete' || event.key === 'Backspace') && (selectedNodeIds.length > 0 || selectedEdgeId)) {
+        event.preventDefault();
+        if (selectedNodeIds.length > 0) deleteSelectedNode();
         if (selectedEdgeId) deleteSelectedEdge();
       }
       if (event.key === 'Escape') {
-        setSelectedNodeId(null);
+        selectNodes([]);
         setSelectedEdgeId(null);
         setEditState(null);
         setEdgeEditState(null);
+        setDeepDiveNodeId(null);
         setShowConfig(false);
         setShowBoardMenu(false);
       }
     }
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [selectedEdgeId, selectedNodeId, editState, editingTitle, edgeEditState]);
+  }, [selectedEdgeId, selectedNodeIds, editState, editingTitle, edgeEditState, undoStack, selectNodes]);
 
   // ── Derived ──
   const workspaceClass = [
@@ -251,34 +347,44 @@ export default function App() {
 
   // ── Node operations ──
   function deleteSelectedNode() {
-    if (!selectedNodeId) return;
-    const removedNode = board.nodes.find((node) => node.id === selectedNodeId);
-    const connectedEdgeCount = board.edges.filter((edge) => edge.from === selectedNodeId || edge.to === selectedNodeId).length;
-    updateActiveBoard({
+    const nodeIds = selectedNodeIds.length > 0
+      ? selectedNodeIds
+      : selectedNodeId
+        ? [selectedNodeId]
+        : [];
+    if (nodeIds.length === 0) return;
+    const nodeIdSet = new Set(nodeIds);
+    const removedNodes = board.nodes.filter((node) => nodeIdSet.has(node.id));
+    const connectedEdgeCount = board.edges.filter((edge) => nodeIdSet.has(edge.from) || nodeIdSet.has(edge.to)).length;
+    updateBoardWithHistory({
       ...board,
-      nodes: board.nodes.filter((n) => n.id !== selectedNodeId),
-      edges: board.edges.filter((e) => e.from !== selectedNodeId && e.to !== selectedNodeId),
+      nodes: board.nodes.filter((n) => !nodeIdSet.has(n.id)),
+      edges: board.edges.filter((e) => !nodeIdSet.has(e.from) && !nodeIdSet.has(e.to)),
       groups: board.groups.map((g) => ({
         ...g,
-        nodeIds: g.nodeIds.filter((nid) => nid !== selectedNodeId),
+        nodeIds: g.nodeIds.filter((nid) => !nodeIdSet.has(nid)),
       })),
     });
     recordEditEvent({
       type: 'node_deleted',
-      nodeId: selectedNodeId,
-      summary: `删除节点 ${removedNode?.title || selectedNodeId}`,
+      nodeId: nodeIds.length === 1 ? nodeIds[0] : undefined,
+      summary: nodeIds.length === 1
+        ? `删除节点 ${removedNodes[0]?.title || nodeIds[0]}`
+        : `删除 ${nodeIds.length} 个节点`,
       details: {
-        title: removedNode?.title,
+        nodeIds,
+        titles: removedNodes.map((node) => node.title),
         connectedEdgeCount,
       },
     });
-    setSelectedNodeId(null);
+    selectNodes([]);
+    if (deepDiveNodeId && nodeIdSet.has(deepDiveNodeId)) setDeepDiveNodeId(null);
   }
 
   function deleteSelectedEdge() {
     if (!selectedEdgeId) return;
     const removedEdge = board.edges.find((edge) => edge.id === selectedEdgeId);
-    updateActiveBoard({
+    updateBoardWithHistory({
       ...board,
       edges: board.edges.filter((edge) => edge.id !== selectedEdgeId),
     });
@@ -295,13 +401,14 @@ export default function App() {
   }
 
   function updateNode(nodeId: string, changes: Partial<BoardNode>) {
-    updateActiveBoard({
+    updateBoardWithHistory({
       ...board,
       nodes: board.nodes.map((node) => (node.id === nodeId ? { ...node, ...changes } : node)),
     });
   }
 
   function startInlineEdit(nodeId: string, field: 'title' | 'body') {
+    setDeepDiveNodeId(null);
     setEditState({ nodeId, field });
   }
 
@@ -327,8 +434,9 @@ export default function App() {
   // ── Edge label editing ──
   function startEdgeLabelEdit(edgeId: string) {
     setSelectedEdgeId(edgeId);
-    setSelectedNodeId(null);
+    selectNodes([]);
     setEditState(null);
+    setDeepDiveNodeId(null);
     setEdgeEditState({ edgeId });
   }
 
@@ -339,7 +447,7 @@ export default function App() {
     const toLabel = normalized ?? '';
 
     if (fromLabel !== toLabel) {
-      updateActiveBoard({
+      updateBoardWithHistory({
         ...board,
         edges: board.edges.map((e) =>
           e.id === edgeId ? { ...e, label: normalized } : e,
@@ -374,7 +482,7 @@ export default function App() {
       style: { fill: '#ffffff', stroke: '#4f74c8' },
       createdBy: 'user',
     };
-    updateActiveBoard({
+    updateBoardWithHistory({
       ...board,
       nodes: [
         ...board.nodes,
@@ -391,8 +499,9 @@ export default function App() {
         y: newNode.y,
       },
     });
-    setSelectedNodeId(newId);
+    selectNodes([newId], newId);
     setSelectedEdgeId(null);
+    setDeepDiveNodeId(null);
     // Auto-enter title edit mode
     setEditState({ nodeId: newId, field: 'title' });
   }
@@ -422,9 +531,11 @@ export default function App() {
         previousGroupCount: board.groups.length,
       },
     });
+    pushUndoSnapshot(board);
     resetActiveBoard();
-    setSelectedNodeId(null);
+    selectNodes([]);
     setEditState(null);
+    setDeepDiveNodeId(null);
     addActivity({
       id: makeActivityId(),
       timestamp: Date.now(),
@@ -437,9 +548,43 @@ export default function App() {
   function handleSubmit() {
     const trimmed = input.trim();
     if (!trimmed) return;
+    if (!isAgentConfigured) {
+      setShowConfig(true);
+      return;
+    }
     submitMessage(trimmed);
     setInput('');
-    setActivityOpen(true);
+  }
+
+  function openNodeDeepDive(nodeId: string) {
+    selectNodes([nodeId], nodeId);
+    setSelectedEdgeId(null);
+    setEditState(null);
+    setEdgeEditState(null);
+    setDeepDiveNodeId(nodeId);
+    setDeepDiveInput((current) => (deepDiveNodeId === nodeId ? current : ''));
+  }
+
+  function closeNodeDeepDive() {
+    setDeepDiveNodeId(null);
+  }
+
+  function handleDeepDiveSubmit() {
+    const trimmed = deepDiveInput.trim();
+    if (!trimmed || !deepDiveNodeId || isPending) return;
+    if (!isAgentConfigured) {
+      setShowConfig(true);
+      return;
+    }
+    const targetNode = board.nodes.find((node) => node.id === deepDiveNodeId);
+    if (!targetNode) {
+      closeNodeDeepDive();
+      return;
+    }
+
+    submitMessage(buildNodeDeepDivePrompt(targetNode, trimmed));
+    setDeepDiveInput('');
+    setDeepDiveNodeId(null);
   }
 
   // ── Render ──
@@ -498,8 +643,11 @@ export default function App() {
                         type="button"
                         className="board-menu-delete"
                         title="删除白板"
+                        aria-label={`删除白板 ${s.title}`}
                         onClick={(e) => {
                           e.stopPropagation();
+                          const confirmed = window.confirm(`确定删除白板「${s.title}」吗？这个操作无法撤销。`);
+                          if (!confirmed) return;
                           deleteSession(s.id);
                           if (sessions.length <= 2) setShowBoardMenu(false);
                         }}
@@ -532,6 +680,15 @@ export default function App() {
           </span>
           <button
             type="button"
+            className="topbar-undo-btn"
+            disabled={!canUndo}
+            onClick={undoLastBoardChange}
+            title="撤销上一步白板修改 (⌘Z / Ctrl+Z)"
+          >
+            撤销
+          </button>
+          <button
+            type="button"
             className={isActivityOpen ? 'active' : ''}
             onClick={() => setActivityOpen((v) => !v)}
           >
@@ -554,12 +711,16 @@ export default function App() {
           <BoardCanvas
             board={board}
             selectedNodeId={selectedNodeId}
+            selectedNodeIds={selectedNodeIds}
             selectedEdgeId={selectedEdgeId}
+            deepDiveNodeId={deepDiveNodeId}
+            deepDiveInput={deepDiveInput}
             editState={editState}
             edgeEditState={edgeEditState}
             boardRef={boardRef}
             isSpaceHeld={isSpaceHeld}
             isPanning={isPanning}
+            isAgentPending={isPending}
             panOffset={panOffset}
             zoom={zoom}
             tempLine={tempLine}
@@ -571,38 +732,65 @@ export default function App() {
               }
               if (isSpaceHeld) return;
               if (editState?.nodeId === nodeId) return;
-              setSelectedNodeId(nodeId);
+              const dragNodeIds = selectedNodeIds.includes(nodeId) ? selectedNodeIds : [nodeId];
+              selectNodes(dragNodeIds, nodeId);
               setSelectedEdgeId(null);
-              handleNodePointerDown(nodeId, event);
+              if (deepDiveNodeId && deepDiveNodeId !== nodeId) setDeepDiveNodeId(null);
+              handleNodePointerDown(nodeId, event, dragNodeIds);
             }}
             onEdgePointerDown={(edgeId, event) => {
               event.stopPropagation();
               setSelectedEdgeId(edgeId);
-              setSelectedNodeId(null);
+              selectNodes([]);
               setEditState(null);
+              setDeepDiveNodeId(null);
             }}
             onCanvasPointerDown={handleCanvasPointerDown}
             onCanvasWheel={handleCanvasWheel}
             onDeselectAll={() => {
-              setSelectedNodeId(null);
+              selectNodes([]);
               setSelectedEdgeId(null);
+              setDeepDiveNodeId(null);
             }}
             onStartEdit={startInlineEdit}
             onCommitEdit={commitInlineEdit}
             onCancelEdit={() => setEditState(null)}
             onCanvasDoubleClick={handleCanvasDoubleClick}
+            onSelectNodes={(nodeIds, primaryNodeId) => {
+              selectNodes(nodeIds, primaryNodeId);
+              setSelectedEdgeId(null);
+              if (deepDiveNodeId && !nodeIds.includes(deepDiveNodeId)) setDeepDiveNodeId(null);
+            }}
             onConnectStart={startConnection}
             onEdgeLabelDoubleClick={startEdgeLabelEdit}
             onCommitEdgeLabel={commitEdgeLabelEdit}
             onCancelEdgeLabel={cancelEdgeLabelEdit}
+            onOpenDeepDive={openNodeDeepDive}
+            onCloseDeepDive={closeNodeDeepDive}
+            onDeepDiveInputChange={setDeepDiveInput}
+            onSubmitDeepDive={handleDeepDiveSubmit}
           />
+
+          {runningActivity ? (
+            <AgentRunOverlay
+              activity={runningActivity}
+              onCancel={cancel}
+              onOpenActivity={() => {
+                setActivityOpen(true);
+                setExpandedActivityId(runningActivity.id);
+              }}
+            />
+          ) : null}
 
           <PromptBar
             input={input}
             onInputChange={setInput}
             onSubmit={handleSubmit}
             onCancel={cancel}
+            onOpenConfig={() => setShowConfig(true)}
             isPending={isPending}
+            isAgentConfigured={isAgentConfigured}
+            providerName={providerName}
           />
         </section>
 
@@ -613,7 +801,6 @@ export default function App() {
             onToggleExpand={(id) => setExpandedActivityId(id)}
             onRespondToInteraction={(runId, decision, activityId) => {
               resumeRun(runId, decision, activityId);
-              setActivityOpen(true);
             }}
             onClose={() => setActivityOpen(false)}
           />

@@ -33,6 +33,15 @@ function newNode(id: string, overrides?: Partial<BoardNode>): BoardNode {
   };
 }
 
+function hasVisualGap(a: BoardNode, b: BoardNode, gap: number) {
+  return (
+    a.x + a.width + gap <= b.x ||
+    b.x + b.width + gap <= a.x ||
+    a.y + a.height + gap <= b.y ||
+    b.y + b.height + gap <= a.y
+  );
+}
+
 // ── Success cases ──
 
 describe('applyPatch — success cases', () => {
@@ -236,14 +245,98 @@ describe('applyPatch — success cases', () => {
 
     const { board: resultBoard, result } = applyPatch(board, patch);
     const [a, b] = resultBoard.nodes;
-    const overlap =
-      a.x < b.x + b.width &&
-      a.x + a.width > b.x &&
-      a.y < b.y + b.height &&
-      a.y + a.height > b.y;
+    expect(result.applied).toBe(true);
+    expect(hasVisualGap(a, b, 56)).toBe(true);
+  });
+
+  it('should add visual spacing even when generated nodes are near but not overlapping', () => {
+    const board = minimalBoard({
+      nodes: [
+        newNode('n1', { x: 100, y: 100, width: 200, height: 100 }),
+      ],
+      edges: [],
+    });
+    const patch: DSLPatch = {
+      type: 'dsl_patch',
+      summary: 'add nearby node',
+      ops: [
+        { op: 'add_node', node: newNode('n2', { x: 100, y: 218, width: 200, height: 100 }) },
+      ],
+    };
+
+    const { board: resultBoard, result } = applyPatch(board, patch);
+    const n1 = resultBoard.nodes.find((node) => node.id === 'n1')!;
+    const n2 = resultBoard.nodes.find((node) => node.id === 'n2')!;
 
     expect(result.applied).toBe(true);
-    expect(overlap).toBe(false);
+    expect(n1.x).toBe(100);
+    expect(n1.y).toBe(100);
+    expect(hasVisualGap(n1, n2, 56)).toBe(true);
+  });
+
+  it('should preserve existing node positions when resolving new node overlaps', () => {
+    const board = minimalBoard();
+    const patch: DSLPatch = {
+      type: 'dsl_patch',
+      summary: 'add overlapping node',
+      ops: [
+        { op: 'add_node', node: newNode('n3', { x: 100, y: 100, width: 200, height: 100 }) },
+      ],
+    };
+
+    const { board: resultBoard, result } = applyPatch(board, patch);
+    const n1 = resultBoard.nodes.find((node) => node.id === 'n1')!;
+    const n2 = resultBoard.nodes.find((node) => node.id === 'n2')!;
+    const n3 = resultBoard.nodes.find((node) => node.id === 'n3')!;
+
+    expect(result.applied).toBe(true);
+    expect(n1.x).toBe(100);
+    expect(n1.y).toBe(100);
+    expect(n2.x).toBe(400);
+    expect(n2.y).toBe(100);
+    expect(n3.y).toBeGreaterThan(100);
+    expect(hasVisualGap(n1, n3, 56)).toBe(true);
+  });
+
+  it('layout in a mixed patch should preserve the existing board unless scope is all', () => {
+    const board = minimalBoard();
+    const patch: DSLPatch = {
+      type: 'dsl_patch',
+      summary: 'add node with default scoped layout',
+      ops: [
+        { op: 'add_node', node: newNode('n3', { x: 100, y: 100, width: 200, height: 100 }) },
+        { op: 'layout', algorithm: 'horizontal' },
+      ],
+    };
+
+    const { board: resultBoard, result } = applyPatch(board, patch);
+    const n1 = resultBoard.nodes.find((node) => node.id === 'n1')!;
+    const n2 = resultBoard.nodes.find((node) => node.id === 'n2')!;
+
+    expect(result.applied).toBe(true);
+    expect(n1.x).toBe(100);
+    expect(n1.y).toBe(100);
+    expect(n2.x).toBe(400);
+    expect(n2.y).toBe(100);
+  });
+
+  it('layout scope all should allow explicit full-board relayout in a mixed patch', () => {
+    const board = minimalBoard();
+    const patch: DSLPatch = {
+      type: 'dsl_patch',
+      summary: 'add node and relayout all',
+      ops: [
+        { op: 'add_node', node: newNode('n3', { x: 100, y: 100, width: 200, height: 100 }) },
+        { op: 'layout', algorithm: 'horizontal', scope: 'all' },
+      ],
+    };
+
+    const { board: resultBoard, result } = applyPatch(board, patch);
+    const n1 = resultBoard.nodes.find((node) => node.id === 'n1')!;
+
+    expect(result.applied).toBe(true);
+    expect(n1.x).toBe(120);
+    expect(n1.y).toBe(120);
   });
 
   it('layout: should default to horizontal when no algorithm specified', () => {

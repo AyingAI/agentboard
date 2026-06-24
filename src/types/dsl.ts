@@ -154,6 +154,8 @@ export interface DeleteGroupOp {
 export interface LayoutOp {
   op: 'layout';
   algorithm?: LayoutAlgorithm;
+  /** Default is "changed"; use "all" only for an explicit full-board relayout. */
+  scope?: 'changed' | 'all';
 }
 
 /** Union of all patch operations */

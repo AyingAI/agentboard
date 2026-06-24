@@ -4,10 +4,10 @@ import type { BoardDSL } from '../types/dsl';
 
 interface DragState {
   nodeId: string;
-  offsetX: number;
-  offsetY: number;
-  startX: number;
-  startY: number;
+  nodeIds: string[];
+  pointerStartX: number;
+  pointerStartY: number;
+  starts: Array<{ nodeId: string; x: number; y: number }>;
 }
 
 interface ViewTransform {
@@ -19,6 +19,11 @@ interface NodeMoveEndEvent {
   nodeId: string;
   from: { x: number; y: number };
   to: { x: number; y: number };
+  moves: Array<{
+    nodeId: string;
+    from: { x: number; y: number };
+    to: { x: number; y: number };
+  }>;
 }
 
 const EDGE_PAN_ZONE = 56;
@@ -72,28 +77,45 @@ export function useDrag(
       const worldX = (localX - panOffset.x) / zoom;
       const worldY = (localY - panOffset.y) / zoom;
 
+      const deltaX = worldX - activeDrag.pointerStartX;
+      const deltaY = worldY - activeDrag.pointerStartY;
+      const startsById = new Map(activeDrag.starts.map((start) => [start.nodeId, start]));
+
       setBoard({
         ...current,
-        nodes: current.nodes.map((node) =>
-          node.id === activeDrag.nodeId
+        nodes: current.nodes.map((node) => {
+          const start = startsById.get(node.id);
+          return start
             ? {
                 ...node,
-                x: Math.round(worldX - activeDrag.offsetX),
-                y: Math.round(worldY - activeDrag.offsetY),
+                x: Math.round(start.x + deltaX),
+                y: Math.round(start.y + deltaY),
               }
-            : node,
-        ),
+            : node;
+        }),
       });
     }
 
     function onPointerUp() {
       const current = getBoard();
-      const node = current.nodes.find((item) => item.id === activeDrag.nodeId);
-      if (node && (node.x !== activeDrag.startX || node.y !== activeDrag.startY)) {
+      const moves = activeDrag.starts
+        .map((start) => {
+          const node = current.nodes.find((item) => item.id === start.nodeId);
+          if (!node || (node.x === start.x && node.y === start.y)) return null;
+          return {
+            nodeId: start.nodeId,
+            from: { x: start.x, y: start.y },
+            to: { x: node.x, y: node.y },
+          };
+        })
+        .filter(Boolean) as NodeMoveEndEvent['moves'];
+      const primaryMove = moves.find((move) => move.nodeId === activeDrag.nodeId) ?? moves[0];
+      if (primaryMove) {
         onNodeMoveEnd?.({
           nodeId: activeDrag.nodeId,
-          from: { x: activeDrag.startX, y: activeDrag.startY },
-          to: { x: node.x, y: node.y },
+          from: primaryMove.from,
+          to: primaryMove.to,
+          moves,
         });
       }
       setDragState(null);
@@ -108,16 +130,29 @@ export function useDrag(
   }, [dragState, getBoard, onNodeMoveEnd, setBoard, setPanOffset]);
 
   const handleNodePointerDown = useCallback(
-    (nodeId: string, event: React.PointerEvent) => {
-      const nodeEl = event.currentTarget as HTMLElement;
-      const nodeRect = nodeEl.getBoundingClientRect();
-      const node = getBoard().nodes.find((item) => item.id === nodeId);
+    (nodeId: string, event: React.PointerEvent, dragNodeIds?: string[]) => {
+      const el = boardRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      const { panOffset, zoom } = viewRef.current;
+      const pointerStartX = (event.clientX - rect.left - panOffset.x) / zoom;
+      const pointerStartY = (event.clientY - rect.top - panOffset.y) / zoom;
+      const board = getBoard();
+      const uniqueNodeIds = Array.from(new Set([...(dragNodeIds?.length ? dragNodeIds : [nodeId])]));
+      const starts = uniqueNodeIds
+        .map((id) => {
+          const node = board.nodes.find((item) => item.id === id);
+          return node ? { nodeId: id, x: node.x, y: node.y } : null;
+        })
+        .filter(Boolean) as DragState['starts'];
+      if (starts.length === 0) return;
+
       setDragState({
         nodeId,
-        offsetX: (event.clientX - nodeRect.left) / viewRef.current.zoom,
-        offsetY: (event.clientY - nodeRect.top) / viewRef.current.zoom,
-        startX: node?.x ?? 0,
-        startY: node?.y ?? 0,
+        nodeIds: starts.map((start) => start.nodeId),
+        pointerStartX,
+        pointerStartY,
+        starts,
       });
     },
     [getBoard],

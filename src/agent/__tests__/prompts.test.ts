@@ -60,6 +60,23 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toMatch(/timeline/);
     expect(prompt).toMatch(/swimlane/);
   });
+
+  it('should instruct the agent to preserve existing layout by default', () => {
+    const prompt = buildSystemPrompt();
+    expect(prompt).toMatch(/Preserve the current layout by default/);
+    expect(prompt).toMatch(/scope "all"/);
+    expect(prompt).toMatch(/at least 56px visual spacing/);
+    expect(prompt).toMatch(/Do not add a layout op just because multiple nodes were added/);
+  });
+
+  it('should instruct the agent to handle flow execution commands safely', () => {
+    const prompt = buildSystemPrompt();
+    expect(prompt).toMatch(/Flow Execution Commands/);
+    expect(prompt).toMatch(/执行流程/);
+    expect(prompt).toMatch(/current board as a possible executable workflow/);
+    expect(prompt).toMatch(/return an interaction_request/);
+    expect(prompt).toMatch(/preserve the original flow nodes/);
+  });
 });
 
 describe('buildUserMessage', () => {

@@ -9,6 +9,7 @@ const START_X = 120;
 const START_Y = 120;
 const GAP_X = 96;
 const GAP_Y = 78;
+const MIN_VISUAL_GAP = 56;
 
 function positionNode(node: BoardNode, x: number, y: number): BoardNode {
   return { ...node, x: Math.round(x), y: Math.round(y) };
@@ -22,7 +23,7 @@ function nodeStepY(node: BoardNode) {
   return node.height + GAP_Y;
 }
 
-function doRectsOverlap(a: BoardNode, b: BoardNode, gap = 28) {
+function doRectsOverlap(a: BoardNode, b: BoardNode, gap = MIN_VISUAL_GAP) {
   return !(
     a.x + a.width + gap <= b.x ||
     b.x + b.width + gap <= a.x ||
@@ -31,10 +32,17 @@ function doRectsOverlap(a: BoardNode, b: BoardNode, gap = 28) {
   );
 }
 
-function resolveOverlaps(nodes: BoardNode[]): BoardNode[] {
-  const placed: BoardNode[] = [];
+function resolveOverlaps(nodes: BoardNode[], movableNodeIds?: Set<string>): BoardNode[] {
+  if (movableNodeIds && movableNodeIds.size === 0) return nodes;
 
-  for (const node of [...nodes].sort((a, b) => a.y - b.y || a.x - b.x)) {
+  const placed: BoardNode[] = movableNodeIds
+    ? nodes.filter((node) => !movableNodeIds.has(node.id)).sort((a, b) => a.y - b.y || a.x - b.x)
+    : [];
+  const candidates = movableNodeIds
+    ? nodes.filter((node) => movableNodeIds.has(node.id))
+    : nodes;
+
+  for (const node of [...candidates].sort((a, b) => a.y - b.y || a.x - b.x)) {
     let candidate = { ...node };
     let attempts = 0;
 
@@ -204,6 +212,8 @@ export function applyPatch(board: BoardDSL, patch: DSLPatch): { board: BoardDSL;
   const errors: ValidationError[] = [];
   let appliedOps = 0;
   let shouldResolveLayout = false;
+  const changedNodeIds = new Set<string>();
+  const patchHasNonLayoutOps = patch.ops.some((op) => op.op !== 'layout');
 
   for (const [index, op] of patch.ops.entries()) {
     if (op.op === 'add_node') {
@@ -223,6 +233,7 @@ export function applyPatch(board: BoardDSL, patch: DSLPatch): { board: BoardDSL;
       next.nodes.push(op.node);
       appliedOps += 1;
       shouldResolveLayout = true;
+      changedNodeIds.add(op.node.id);
     }
 
     if (op.op === 'update_node') {
@@ -251,6 +262,7 @@ export function applyPatch(board: BoardDSL, patch: DSLPatch): { board: BoardDSL;
         op.changes.height !== undefined
       ) {
         shouldResolveLayout = true;
+        changedNodeIds.add(op.nodeId);
       }
     }
 
@@ -272,6 +284,7 @@ export function applyPatch(board: BoardDSL, patch: DSLPatch): { board: BoardDSL;
         continue;
       }
       appliedOps += 1;
+      changedNodeIds.delete(op.nodeId);
     }
 
     if (op.op === 'add_edge') {
@@ -365,14 +378,19 @@ export function applyPatch(board: BoardDSL, patch: DSLPatch): { board: BoardDSL;
     }
 
     if (op.op === 'layout') {
-      next.nodes = layoutNodes(next.nodes, op.algorithm, next.edges, next.groups);
+      if (op.scope === 'all' || !patchHasNonLayoutOps) {
+        next.nodes = layoutNodes(next.nodes, op.algorithm, next.edges, next.groups);
+        changedNodeIds.clear();
+      } else {
+        next.nodes = resolveOverlaps(next.nodes, changedNodeIds);
+      }
       appliedOps += 1;
       shouldResolveLayout = false;
     }
   }
 
   if (shouldResolveLayout) {
-    next.nodes = resolveOverlaps(next.nodes);
+    next.nodes = resolveOverlaps(next.nodes, changedNodeIds);
   }
 
   const boardErrors = validateBoard(next);

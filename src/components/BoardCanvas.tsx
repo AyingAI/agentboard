@@ -24,12 +24,16 @@ interface EdgeEditState {
 interface BoardCanvasProps {
   board: BoardDSL;
   selectedNodeId: string | null;
+  selectedNodeIds: string[];
   selectedEdgeId: string | null;
+  deepDiveNodeId: string | null;
+  deepDiveInput: string;
   editState: EditState | null;
   edgeEditState: EdgeEditState | null;
   boardRef: React.RefObject<HTMLDivElement>;
   isSpaceHeld: boolean;
   isPanning: boolean;
+  isAgentPending: boolean;
   panOffset: { x: number; y: number };
   zoom: number;
   tempLine: TempLine | null;
@@ -42,10 +46,22 @@ interface BoardCanvasProps {
   onCommitEdit: (nodeId: string, field: 'title' | 'body', value: string) => void;
   onCancelEdit: () => void;
   onCanvasDoubleClick: (x: number, y: number) => void;
+  onSelectNodes: (nodeIds: string[], primaryNodeId?: string | null) => void;
   onConnectStart: (nodeId: string, x: number, y: number) => void;
   onEdgeLabelDoubleClick: (edgeId: string) => void;
   onCommitEdgeLabel: (edgeId: string, value: string) => void;
   onCancelEdgeLabel: () => void;
+  onOpenDeepDive: (nodeId: string) => void;
+  onCloseDeepDive: () => void;
+  onDeepDiveInputChange: (value: string) => void;
+  onSubmitDeepDive: () => void;
+}
+
+interface SelectionBox {
+  startX: number;
+  startY: number;
+  currentX: number;
+  currentY: number;
 }
 
 /** Find intersection of ray from node center toward target with node border */
@@ -134,6 +150,81 @@ interface EdgeLabelEditorProps {
   onCancel: () => void;
 }
 
+interface DeepDivePopoverProps {
+  node: BoardNodeType;
+  value: string;
+  isPending: boolean;
+  contentWidth: number;
+  onChange: (value: string) => void;
+  onSubmit: () => void;
+  onClose: () => void;
+}
+
+function DeepDivePopover({
+  node,
+  value,
+  isPending,
+  contentWidth,
+  onChange,
+  onSubmit,
+  onClose,
+}: DeepDivePopoverProps) {
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const placeLeft = node.x + node.width + 352 > contentWidth;
+  const left = placeLeft ? Math.max(32, node.x - 336) : node.x + node.width + 16;
+  const top = Math.max(32, node.y - 4);
+
+  useLayoutEffect(() => {
+    textareaRef.current?.focus();
+  }, [node.id]);
+
+  return (
+    <form
+      className={`deep-dive-popover ${placeLeft ? 'place-left' : 'place-right'}`}
+      style={{ left, top }}
+      onPointerDown={(event) => event.stopPropagation()}
+      onDoubleClick={(event) => event.stopPropagation()}
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (!isPending && value.trim()) onSubmit();
+      }}
+    >
+      <div className="deep-dive-header">
+        <div>
+          <div className="deep-dive-eyebrow">单点深挖</div>
+          <div className="deep-dive-target" title={node.title}>{node.title}</div>
+        </div>
+        <button type="button" className="deep-dive-close" onClick={onClose} aria-label="关闭深挖浮窗">
+          ×
+        </button>
+      </div>
+      <textarea
+        ref={textareaRef}
+        value={value}
+        rows={4}
+        disabled={isPending}
+        placeholder="你希望 AI 从哪个角度深挖？例如：补充风险、找证据、拆执行步骤、扩展竞品方案…"
+        onChange={(event) => onChange(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === 'Escape') {
+            event.preventDefault();
+            onClose();
+          }
+          if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+            event.preventDefault();
+            if (!isPending && value.trim()) onSubmit();
+          }
+        }}
+      />
+      <div className="deep-dive-footer">
+        <button type="submit" disabled={isPending || !value.trim()}>
+          {isPending ? '处理中' : '发送'}
+        </button>
+      </div>
+    </form>
+  );
+}
+
 /**
  * Per-edit-session label input. Owns its own finishedRef so a fresh false
  * is guaranteed on every mount — no bleed across edit cycles.
@@ -194,12 +285,16 @@ function sameMeasurements(a: NodeMeasurements, b: NodeMeasurements) {
 export default function BoardCanvas({
   board,
   selectedNodeId,
+  selectedNodeIds,
   selectedEdgeId,
+  deepDiveNodeId,
+  deepDiveInput,
   editState,
   edgeEditState,
   boardRef,
   isSpaceHeld,
   isPanning,
+  isAgentPending,
   panOffset,
   zoom,
   tempLine,
@@ -212,12 +307,18 @@ export default function BoardCanvas({
   onCommitEdit,
   onCancelEdit,
   onCanvasDoubleClick,
+  onSelectNodes,
   onConnectStart,
   onEdgeLabelDoubleClick,
   onCommitEdgeLabel,
   onCancelEdgeLabel,
+  onOpenDeepDive,
+  onCloseDeepDive,
+  onDeepDiveInputChange,
+  onSubmitDeepDive,
 }: BoardCanvasProps) {
   const [nodeMeasurements, setNodeMeasurements] = useState<NodeMeasurements>(() => new Map());
+  const [selectionBox, setSelectionBox] = useState<SelectionBox | null>(null);
 
   const nodeMap = useMemo(
     () => new Map(board.nodes.map((node) => {
@@ -270,6 +371,101 @@ export default function BoardCanvas({
     return () => observer.disconnect();
   }, [board.nodes, boardRef, zoom]);
 
+  function worldPointFromEvent(event: React.PointerEvent | PointerEvent) {
+    const rect = boardRef.current?.getBoundingClientRect();
+    if (!rect) return null;
+    return {
+      x: (event.clientX - rect.left - panOffset.x) / zoom,
+      y: (event.clientY - rect.top - panOffset.y) / zoom,
+    };
+  }
+
+  function isBlankSelectionTarget(target: Element | null) {
+    return isBlankCanvasTarget(target);
+  }
+
+  function nodesIntersectingSelection(box: SelectionBox) {
+    const minX = Math.min(box.startX, box.currentX);
+    const minY = Math.min(box.startY, box.currentY);
+    const maxX = Math.max(box.startX, box.currentX);
+    const maxY = Math.max(box.startY, box.currentY);
+
+    return board.nodes
+      .filter((node) => {
+        const measured = nodeMap.get(node.id) ?? node;
+        return (
+          measured.x < maxX &&
+          measured.x + measured.width > minX &&
+          measured.y < maxY &&
+          measured.y + measured.height > minY
+        );
+      })
+      .map((node) => node.id);
+  }
+
+  function startSelectionBox(event: React.PointerEvent<HTMLDivElement>) {
+    if (event.button !== 0) return false;
+    if (!isBlankSelectionTarget(event.target as Element)) return false;
+    const start = worldPointFromEvent(event);
+    if (!start) return false;
+
+    event.preventDefault();
+    const initialBox: SelectionBox = {
+      startX: start.x,
+      startY: start.y,
+      currentX: start.x,
+      currentY: start.y,
+    };
+    setSelectionBox(initialBox);
+
+    let latestBox = initialBox;
+    let didMove = false;
+
+    function onMove(moveEvent: PointerEvent) {
+      const current = worldPointFromEvent(moveEvent);
+      if (!current) return;
+      latestBox = {
+        ...initialBox,
+        currentX: current.x,
+        currentY: current.y,
+      };
+      if (
+        Math.abs(latestBox.currentX - latestBox.startX) > 4 ||
+        Math.abs(latestBox.currentY - latestBox.startY) > 4
+      ) {
+        didMove = true;
+      }
+      setSelectionBox(latestBox);
+    }
+
+    function onUp() {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      setSelectionBox(null);
+
+      if (!didMove) {
+        onDeselectAll();
+        return;
+      }
+
+      const nodeIds = nodesIntersectingSelection(latestBox);
+      onSelectNodes(nodeIds, nodeIds[0] ?? null);
+    }
+
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    return true;
+  }
+
+  const selectionRect = selectionBox
+    ? {
+        left: Math.min(selectionBox.startX, selectionBox.currentX),
+        top: Math.min(selectionBox.startY, selectionBox.currentY),
+        width: Math.abs(selectionBox.currentX - selectionBox.startX),
+        height: Math.abs(selectionBox.currentY - selectionBox.startY),
+      }
+    : null;
+
   return (
     <div
       className={`board-canvas ${isSpaceHeld ? 'space-held' : ''} ${isPanning ? 'panning' : ''}`}
@@ -281,7 +477,8 @@ export default function BoardCanvas({
       onWheel={onCanvasWheel}
       onPointerDown={(e) => {
         const handled = onCanvasPointerDown(e);
-        if (!handled) onDeselectAll();
+        if (handled) return;
+        startSelectionBox(e);
       }}
       onDoubleClick={(e) => {
         if (isBlankCanvasTarget(e.target as Element)) {
@@ -390,9 +587,12 @@ export default function BoardCanvas({
         {/* Nodes */}
         {board.nodes.map((node) => (
           <BoardNode key={node.id} node={node}
-            isSelected={selectedNodeId === node.id} editState={editState}
+            isSelected={selectedNodeIds.includes(node.id)}
+            isPrimarySelected={selectedNodeId === node.id}
+            editState={editState}
             onPointerDown={onPointerDown} onStartEdit={onStartEdit}
             onCommitEdit={onCommitEdit} onCancelEdit={onCancelEdit}
+            onOpenDeepDive={onOpenDeepDive}
             onConnectStart={(nodeId, side) => {
               const measuredNode = nodeMap.get(nodeId);
               if (!measuredNode) return;
@@ -400,6 +600,30 @@ export default function BoardCanvas({
               onConnectStart(nodeId, start.x, start.y);
             }} />
         ))}
+
+        {selectionRect ? (
+          <div
+            className="selection-marquee"
+            style={{
+              left: selectionRect.left,
+              top: selectionRect.top,
+              width: selectionRect.width,
+              height: selectionRect.height,
+            }}
+          />
+        ) : null}
+
+        {deepDiveNodeId && nodeMap.get(deepDiveNodeId) ? (
+          <DeepDivePopover
+            node={nodeMap.get(deepDiveNodeId)!}
+            value={deepDiveInput}
+            isPending={isAgentPending}
+            contentWidth={contentSize.w}
+            onChange={onDeepDiveInputChange}
+            onSubmit={onSubmitDeepDive}
+            onClose={onCloseDeepDive}
+          />
+        ) : null}
       </div>
 
       {/* Empty canvas hint */}
