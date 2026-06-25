@@ -1,25 +1,7 @@
-import type { DSLPatch } from '../types/dsl';
 import type { AgentAdapter, AgentError, AgentRequest } from './types';
 import { buildSystemPrompt, buildUserMessage } from './prompts';
-
-/** Extract JSON from text, handling markdown code fences */
-function extractJson(text: string): string {
-  const m = text.match(/```(?:json)?\s*([\s\S]*?)```/);
-  if (m) return m[1].trim();
-  const s = text.indexOf('{');
-  const e = text.lastIndexOf('}');
-  if (s !== -1 && e !== -1 && e > s) return text.slice(s, e + 1);
-  return text;
-}
-
-function assertIsDSLPatch(obj: unknown): DSLPatch {
-  if (!obj || typeof obj !== 'object') throw new Error('Response is not a JSON object');
-  const p = obj as Record<string, unknown>;
-  if (p.type !== 'dsl_patch') throw new Error('Missing "type": "dsl_patch"');
-  if (typeof p.summary !== 'string') throw new Error('Missing "summary"');
-  if (!Array.isArray(p.ops)) throw new Error('Missing "ops" array');
-  return { type: 'dsl_patch', summary: p.summary as string, ops: p.ops as DSLPatch['ops'], questions: Array.isArray(p.questions) ? p.questions as string[] : [] };
-}
+import { fallbackInteractionFromText, parseAgentResponse } from './response';
+import { DEFAULT_TIMEOUT_MS, mapAbortError, withTimeout } from './resilience';
 
 export class OpenAIAgentAdapter implements AgentAdapter {
   readonly name: string;
@@ -28,16 +10,21 @@ export class OpenAIAgentAdapter implements AgentAdapter {
     this.name = `OpenAI (${config.model || 'gpt-4o'})`;
   }
 
-  async generatePatch(request: AgentRequest): Promise<DSLPatch> {
+  async generateResponse(request: AgentRequest) {
     if (!this.config.apiKey) {
       throw { code: 'AUTH_ERROR', message: '未配置 OpenAI API Key' } satisfies AgentError;
     }
 
     const systemPrompt = buildSystemPrompt();
-    const userMessage = buildUserMessage(request.boardState, request.userMessage);
+    const userMessage = buildUserMessage(request.boardState, request.userMessage, {
+      runId: request.runId,
+      runContext: request.runContext,
+      recentEditEvents: request.recentEditEvents,
+    });
     const baseUrl = this.config.baseUrl || 'https://api.openai.com/v1';
 
     let response: Response;
+    const { signal, cleanup } = withTimeout(request.signal, DEFAULT_TIMEOUT_MS);
     try {
       response = await fetch(`${baseUrl}/chat/completions`, {
         method: 'POST',
@@ -54,9 +41,12 @@ export class OpenAIAgentAdapter implements AgentAdapter {
           temperature: 0,
           max_tokens: 4096,
         }),
+        signal,
       });
     } catch {
-      throw { code: 'NETWORK_ERROR', message: '网络请求失败，请检查网络连接或 Base URL' } satisfies AgentError;
+      throw mapAbortError(signal, '网络请求失败，请检查网络连接或 Base URL');
+    } finally {
+      cleanup();
     }
 
     if (!response.ok) {
@@ -76,10 +66,11 @@ export class OpenAIAgentAdapter implements AgentAdapter {
     }
 
     try {
-      const json = extractJson(text);
-      return assertIsDSLPatch(JSON.parse(json));
+      return parseAgentResponse(text);
     } catch (err) {
-      throw { code: 'PARSE_ERROR', message: `OpenAI 返回内容不是合法的 DSLPatch：${err instanceof Error ? err.message : String(err)}`, rawText: text.slice(0, 2000) } satisfies AgentError;
+      const interaction = fallbackInteractionFromText(text, request.runId ?? `run_${Date.now()}`);
+      if (interaction) return interaction;
+      throw { code: 'PARSE_ERROR', message: `OpenAI 返回内容不是合法的 AgentBoard 响应：${err instanceof Error ? err.message : String(err)}`, rawText: text.slice(0, 2000) } satisfies AgentError;
     }
   }
 }

@@ -1,0 +1,158 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1180" viewBox="0 0 1800 1180">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#F7F8FF"/>
+      <stop offset="55%" stop-color="#F5FAFF"/>
+      <stop offset="100%" stop-color="#F7FCF9"/>
+    </linearGradient>
+    <linearGradient id="core" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#E2E2FF"/>
+      <stop offset="100%" stop-color="#D7D5FF"/>
+    </linearGradient>
+    <linearGradient id="agent" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#ECF4FF"/>
+      <stop offset="100%" stop-color="#E5EEFF"/>
+    </linearGradient>
+    <linearGradient id="human" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#FFF5DF"/>
+      <stop offset="100%" stop-color="#FFE9BC"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="10" stdDeviation="16" flood-color="#25305C" flood-opacity="0.12"/>
+    </filter>
+    <marker id="arrowPurple" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M0,0 L12,6 L0,12 Z" fill="#6966E8"/>
+    </marker>
+    <marker id="arrowBlue" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M0,0 L12,6 L0,12 Z" fill="#4684E8"/>
+    </marker>
+    <marker id="arrowGreen" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M0,0 L12,6 L0,12 Z" fill="#29A37A"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1800" height="1180" fill="url(#bg)"/>
+  <circle cx="1605" cy="90" r="190" fill="#6A67E8" opacity="0.05"/>
+  <circle cx="135" cy="1030" r="230" fill="#2FB387" opacity="0.05"/>
+
+  <text x="90" y="82" font-family="Noto Sans SC, sans-serif" font-size="44" font-weight="700" fill="#17213D">AgentBoard 如何工作</text>
+  <text x="90" y="126" font-family="Noto Sans SC, sans-serif" font-size="23" fill="#58627B">把 Agent 的理解变成一份人和多个 Agent 都能读写、检查与接续的共享上下文</text>
+
+  <rect x="90" y="170" width="1620" height="550" rx="34" fill="#FFFFFF" stroke="#DDE3F2" stroke-width="2" filter="url(#shadow)"/>
+  <rect x="118" y="194" width="238" height="42" rx="21" fill="#ECECFF"/>
+  <text x="237" y="223" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="20" font-weight="700" fill="#5552CF">人机理解与执行闭环</text>
+
+  <!-- Human side -->
+  <circle cx="225" cy="340" r="70" fill="url(#human)" stroke="#E9B84F" stroke-width="3"/>
+  <circle cx="225" cy="316" r="19" fill="#A76E20"/>
+  <path d="M186 370 Q225 330 264 370 L264 387 L186 387 Z" fill="#A76E20"/>
+  <text x="225" y="448" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="26" font-weight="700" fill="#27314D">用户</text>
+  <text x="225" y="480" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="18" fill="#68728A">提出目标 · 修正理解 · 确认决策</text>
+
+  <!-- Agent side -->
+  <circle cx="1575" cy="340" r="70" fill="url(#agent)" stroke="#5C8EE6" stroke-width="3"/>
+  <rect x="1537" y="305" width="76" height="65" rx="16" fill="#477BD4"/>
+  <circle cx="1560" cy="334" r="7" fill="#FFFFFF"/>
+  <circle cx="1590" cy="334" r="7" fill="#FFFFFF"/>
+  <path d="M1554 353 Q1575 366 1596 353" fill="none" stroke="#FFFFFF" stroke-width="5" stroke-linecap="round"/>
+  <line x1="1575" y1="293" x2="1575" y2="305" stroke="#477BD4" stroke-width="5"/>
+  <circle cx="1575" cy="286" r="7" fill="#477BD4"/>
+  <text x="1575" y="448" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="26" font-weight="700" fill="#27314D">各类 Agent</text>
+  <text x="1575" y="480" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="18" fill="#68728A">分析 · 生成方案 · 调用工具执行</text>
+
+  <!-- Core -->
+  <rect x="590" y="258" width="620" height="330" rx="38" fill="url(#core)" filter="url(#shadow)"/>
+  <circle cx="900" cy="322" r="35" fill="#FFFFFF" opacity="0.18"/>
+  <path d="M882 322 L896 336 L921 307" fill="none" stroke="#5B58D6" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="900" y="386" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="34" font-weight="700" fill="#272551">共享的结构化上下文</text>
+  <text x="900" y="425" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="20" fill="#57557D">不是聊天记录，也不只是一张图</text>
+
+  <rect x="650" y="462" width="145" height="72" rx="18" fill="#FFFFFF" opacity="0.72" stroke="#A8A5ED"/>
+  <text x="722" y="493" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="20" font-weight="700" fill="#39366F">BoardDSL</text>
+  <text x="722" y="519" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="16" fill="#57557D">目标 · 关系 · 状态</text>
+
+  <rect x="828" y="462" width="145" height="72" rx="18" fill="#FFFFFF" opacity="0.72" stroke="#A8A5ED"/>
+  <text x="900" y="493" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="20" font-weight="700" fill="#39366F">DSLPatch</text>
+  <text x="900" y="519" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="16" fill="#57557D">局部新增 · 修改</text>
+
+  <rect x="1006" y="462" width="145" height="72" rx="18" fill="#FFFFFF" opacity="0.72" stroke="#A8A5ED"/>
+  <text x="1078" y="493" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="20" font-weight="700" fill="#39366F">Revision</text>
+  <text x="1078" y="519" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="16" fill="#57557D">版本 · 事件 · 追踪</text>
+
+  <!-- Human and agent connections -->
+  <polyline points="300,330 450,330 450,365 570,365" fill="none" stroke="#C8902E" stroke-width="5" marker-end="url(#arrowPurple)"/>
+  <text x="440" y="306" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="17" font-weight="600" fill="#93661F">自然语言 / 直接编辑</text>
+  <polyline points="590,530 450,530 450,505 300,505" fill="none" stroke="#6966E8" stroke-width="5" marker-end="url(#arrowPurple)"/>
+  <text x="440" y="565" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="17" font-weight="600" fill="#5C59CC">可视化呈现，随时检查纠偏</text>
+
+  <polyline points="1230,365 1350,365 1350,330 1500,330" fill="none" stroke="#4684E8" stroke-width="5" marker-end="url(#arrowBlue)"/>
+  <text x="1360" y="306" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="17" font-weight="600" fill="#346DBB">读取完整上下文</text>
+  <polyline points="1500,505 1350,505 1350,530 1210,530" fill="none" stroke="#4684E8" stroke-width="5" marker-end="url(#arrowBlue)"/>
+  <text x="1380" y="565" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="16" font-weight="600" fill="#346DBB">Patch / 确认 / 结果</text>
+
+  <!-- Views -->
+  <text x="900" y="635" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="18" font-weight="700" fill="#47516A">同一份语义，可按需要呈现为不同界面</text>
+  <rect x="475" y="661" width="180" height="38" rx="19" fill="#F0F1FF"/>
+  <text x="565" y="687" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="17" fill="#5653CD">白板 / 关系图</text>
+  <rect x="675" y="661" width="180" height="38" rx="19" fill="#ECF5FF"/>
+  <text x="765" y="687" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="17" fill="#3B75C5">表格 / 看板</text>
+  <rect x="875" y="661" width="180" height="38" rx="19" fill="#EAF8F3"/>
+  <text x="965" y="687" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="17" fill="#278464">流程 / 时间线</text>
+  <rect x="1075" y="661" width="250" height="38" rx="19" fill="#FFF3E3"/>
+  <text x="1200" y="687" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="17" fill="#A36A1E">桌面 / Web / 移动端</text>
+
+  <!-- Multi-agent section -->
+  <rect x="90" y="758" width="1620" height="344" rx="34" fill="#E9EEF9" stroke="#C9D4E9" stroke-width="2" filter="url(#shadow)"/>
+  <rect x="118" y="782" width="270" height="42" rx="21" fill="#D6E0F5"/>
+  <text x="253" y="811" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="20" font-weight="700" fill="#33466D">多 Agent 并行提案、受控合并</text>
+
+  <rect x="135" y="858" width="230" height="150" rx="26" fill="#F7F9FD" stroke="#8797B8" stroke-width="2"/>
+  <text x="250" y="895" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="20" font-weight="700" fill="#263653">Main Board</text>
+  <text x="250" y="925" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="16" fill="#5D6D8B">稳定共识层</text>
+  <rect x="177" y="952" width="146" height="36" rx="18" fill="#665FE2"/>
+  <text x="250" y="977" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="16" font-weight="700" fill="#FFFFFF">Revision N</text>
+
+  <polyline points="365,933 445,933" fill="none" stroke="#8E99B4" stroke-width="4" marker-end="url(#arrowBlue)"/>
+
+  <g>
+    <rect x="465" y="842" width="215" height="70" rx="18" fill="#DDEBFC" stroke="#4E84C5" stroke-width="2"/>
+    <text x="572" y="872" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="18" font-weight="700" fill="#244D80">产品 Agent</text>
+    <text x="572" y="897" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="15" fill="#3D628D">Workspace → Proposal A</text>
+
+    <rect x="465" y="923" width="215" height="70" rx="18" fill="#EEE7FC" stroke="#8A68D8" stroke-width="2"/>
+    <text x="572" y="953" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="18" font-weight="700" fill="#583E8B">技术 Agent</text>
+    <text x="572" y="978" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="15" fill="#735A9D">Workspace → Proposal B</text>
+
+    <rect x="465" y="1004" width="215" height="70" rx="18" fill="#DDF4EC" stroke="#45A98C" stroke-width="2"/>
+    <text x="572" y="1034" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="18" font-weight="700" fill="#286F5B">风险 Agent</text>
+    <text x="572" y="1059" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="15" fill="#447F6F">Workspace → Proposal C</text>
+  </g>
+
+  <polyline points="700,877 785,877 785,925 835,925" fill="none" stroke="#6FA4E8" stroke-width="4" marker-end="url(#arrowBlue)"/>
+  <polyline points="700,958 835,958" fill="none" stroke="#9D7FE5" stroke-width="4" marker-end="url(#arrowPurple)"/>
+  <polyline points="700,1039 785,1039 785,991 835,991" fill="none" stroke="#55B99A" stroke-width="4" marker-end="url(#arrowGreen)"/>
+
+  <rect x="855" y="862" width="270" height="150" rx="28" fill="#FFF8E9" stroke="#F0C76A" stroke-width="3"/>
+  <text x="990" y="900" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="21" font-weight="700" fill="#493C27">人来比较与决策</text>
+  <text x="990" y="934" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="17" fill="#735E39">查看改了什么 · 为什么改</text>
+  <text x="990" y="963" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="17" fill="#735E39">选择一个 · 拒绝 · 综合多个</text>
+  <rect x="909" y="980" width="162" height="34" rx="17" fill="#E6B64D"/>
+  <text x="990" y="1003" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="15" font-weight="700" fill="#403118">Owner 保留最终控制</text>
+
+  <polyline points="1125,937 1205,937" fill="none" stroke="#E9B94E" stroke-width="5" marker-end="url(#arrowGreen)"/>
+
+  <rect x="1225" y="862" width="190" height="150" rx="28" fill="#DDF4EC" stroke="#3FA98A" stroke-width="3"/>
+  <text x="1320" y="900" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="21" font-weight="700" fill="#215D4E">Merge</text>
+  <text x="1320" y="932" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="16" fill="#397565">Patch 校验</text>
+  <text x="1320" y="960" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="16" fill="#397565">冲突检查 · 短暂加锁</text>
+  <text x="1320" y="988" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="16" fill="#397565">串行写入主画板</text>
+
+  <polyline points="1415,937 1480,937" fill="none" stroke="#55B99A" stroke-width="5" marker-end="url(#arrowGreen)"/>
+
+  <rect x="1500" y="878" width="165" height="118" rx="26" fill="#EAF9F4" stroke="#48AE8C" stroke-width="3"/>
+  <text x="1582" y="916" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="19" font-weight="700" fill="#235D4E">Main Board</text>
+  <text x="1582" y="947" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="16" fill="#337965">新共识</text>
+  <text x="1582" y="976" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="18" font-weight="700" fill="#278464">Revision N+1</text>
+
+  <text x="900" y="1142" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="20" font-weight="700" fill="#3C4661">核心原则：Agent 并行思考，Proposal 并行提交，Main Board 串行合并</text>
+</svg>

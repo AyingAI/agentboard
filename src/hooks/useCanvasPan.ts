@@ -1,7 +1,15 @@
 import { useCallback, useEffect, useState } from 'react';
 
+const MIN_ZOOM = 0.35;
+const MAX_ZOOM = 2.4;
+
+function clampZoom(value: number) {
+  return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, value));
+}
+
 export function useCanvasPan() {
   const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
+  const [zoom, setZoom] = useState(1);
   const [isSpaceHeld, setSpaceHeld] = useState(false);
   const [isPanning, setIsPanning] = useState(false);
 
@@ -63,5 +71,37 @@ export function useCanvasPan() {
     [isSpaceHeld, panOffset],
   );
 
-  return { panOffset, isSpaceHeld, isPanning, handleCanvasPointerDown };
+  const handleCanvasWheel = useCallback(
+    (e: React.WheelEvent<HTMLDivElement>) => {
+      if (!e.metaKey && !e.ctrlKey) return;
+
+      e.preventDefault();
+
+      const rect = e.currentTarget.getBoundingClientRect();
+      const localX = e.clientX - rect.left;
+      const localY = e.clientY - rect.top;
+      const nextZoom = clampZoom(zoom * Math.exp(-e.deltaY * 0.0015));
+      if (nextZoom === zoom) return;
+
+      const worldX = (localX - panOffset.x) / zoom;
+      const worldY = (localY - panOffset.y) / zoom;
+
+      setZoom(nextZoom);
+      setPanOffset({
+        x: localX - worldX * nextZoom,
+        y: localY - worldY * nextZoom,
+      });
+    },
+    [panOffset, zoom],
+  );
+
+  return {
+    panOffset,
+    setPanOffset,
+    zoom,
+    isSpaceHeld,
+    isPanning,
+    handleCanvasPointerDown,
+    handleCanvasWheel,
+  };
 }

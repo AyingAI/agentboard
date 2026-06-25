@@ -8,30 +8,70 @@ interface EditState {
 interface BoardNodeProps {
   node: BoardNodeType;
   isSelected: boolean;
+  isPrimarySelected: boolean;
   editState: EditState | null;
   onPointerDown: (nodeId: string, event: React.PointerEvent) => void;
   onStartEdit: (nodeId: string, field: 'title' | 'body') => void;
   onCommitEdit: (nodeId: string, field: 'title' | 'body', value: string) => void;
   onCancelEdit: () => void;
-  onConnectStart: (nodeId: string, x: number, y: number) => void;
+  onConnectStart: (nodeId: string, side: 'top' | 'right' | 'bottom' | 'left') => void;
+  onOpenDeepDive: (nodeId: string) => void;
 }
+
+const TAG_LABELS: Record<string, string> = {
+  concept: 'CONCEPT',
+  module: 'MODULE',
+  actor: 'ACTOR',
+  input: 'INPUT',
+  output: 'OUTPUT',
+  decision: 'DECISION',
+  risk: 'RISK',
+  question: 'QUESTION',
+  assumption: 'ASSUMPTION',
+  metric: 'METRIC',
+  evidence: 'EVIDENCE',
+  action: 'ACTION',
+};
+
+function tagClassName(tag: string) {
+  return `tag-${tag.replace(/[^a-z0-9_-]/gi, '').toLowerCase()}`;
+}
+
+const CONNECTION_SIDE_LABELS = {
+  top: '上方',
+  right: '右侧',
+  bottom: '下方',
+  left: '左侧',
+} as const;
 
 export default function BoardNode({
   node,
   isSelected,
+  isPrimarySelected,
   editState,
   onPointerDown,
   onStartEdit,
   onCommitEdit,
   onCancelEdit,
   onConnectStart,
+  onOpenDeepDive,
 }: BoardNodeProps) {
   const isEditing = editState?.nodeId === node.id;
   const editingField = editState?.field;
+  const semanticTag = node.tags?.find((tag) => TAG_LABELS[tag]) ?? null;
+  const tagClasses = node.tags?.map(tagClassName).join(' ') ?? '';
+  const kicker = semanticTag
+    ? TAG_LABELS[semanticTag]
+    : node.type === 'note'
+      ? 'NOTE'
+      : node.createdBy === 'agent'
+        ? 'AGENT'
+        : 'USER';
 
   return (
     <article
-      className={`board-node ${node.type} ${isSelected ? 'selected' : ''}`}
+      className={`board-node ${node.type} ${tagClasses} ${isSelected ? 'selected' : ''} ${isPrimarySelected ? 'primary-selected' : ''}`}
+      data-node-id={node.id}
       style={{
         left: node.x,
         top: node.y,
@@ -46,8 +86,26 @@ export default function BoardNode({
       }}
     >
       <div className="node-kicker">
-        {node.type === 'note' ? 'NOTE' : node.createdBy === 'agent' ? 'AGENT' : 'USER'}
+        {kicker}
       </div>
+
+      {isPrimarySelected && !isEditing ? (
+        <button
+          type="button"
+          className="node-deep-dive-button"
+          title="围绕这个节点深挖"
+          aria-label="围绕这个节点深挖"
+          onPointerDown={(event) => {
+            event.stopPropagation();
+          }}
+          onClick={(event) => {
+            event.stopPropagation();
+            onOpenDeepDive(node.id);
+          }}
+        >
+          深
+        </button>
+      ) : null}
 
       {isEditing && editingField === 'title' ? (
         <input
@@ -83,25 +141,23 @@ export default function BoardNode({
         </p>
       )}
 
-      {/* Connection handle — drag to another node to create an edge */}
-      {isSelected && (
-        <div
-          className="connect-handle"
-          title="拖拽到另一个节点创建连线"
-          onPointerDown={(e) => {
-            e.stopPropagation();
-            const rect = (e.currentTarget.parentElement as HTMLElement)?.getBoundingClientRect();
-            if (rect) {
-              const cx = rect.left + rect.width / 2;
-              const cy = rect.bottom;
-              onConnectStart(node.id, cx, cy);
-            }
-          }}
-        >
-          <svg width="16" height="16" viewBox="0 0 16 16">
-            <circle cx="8" cy="8" r="6" fill="#4f74c8" stroke="#fff" strokeWidth="2" />
-            <path d="M8 4v8M4 8h8" stroke="#fff" strokeWidth="1.5" />
-          </svg>
+      {/* Connection handles — drag from any side to another node to create an edge */}
+      {isPrimarySelected && (
+        <div className="connect-handles">
+          {(['top', 'right', 'bottom', 'left'] as const).map((side) => (
+            <button
+              key={side}
+              type="button"
+              className={`connect-handle ${side}`}
+              title="拖拽到另一个节点创建连线"
+              aria-label={`从${CONNECTION_SIDE_LABELS[side]}连接到另一个节点`}
+              onPointerDown={(e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                onConnectStart(node.id, side);
+              }}
+            />
+          ))}
         </div>
       )}
     </article>
