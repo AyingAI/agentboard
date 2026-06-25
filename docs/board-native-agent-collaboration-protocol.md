@@ -234,6 +234,55 @@ FlowRun 必须回答六个问题：
 
 如果无法回答这些问题，Agent 不应直接执行，应先返回 `interaction_request`。
 
+### Artifact
+
+Artifact 是 Agent 执行后的可交付产物。它和白板节点不是同一类对象：
+
+- `BoardNode` 负责表达思考结构、决策点、任务步骤和关系。
+- `Artifact` 负责承载可复用、可下载、可继续加工的产出物，例如文档、代码、图片、表格、报告、数据文件、压缩包。
+
+不要把长文档、完整代码或大段结果直接塞进节点正文。节点只保留摘要、状态和入口；真正产物放在 Artifact 里，并通过引用挂回相关节点或 FlowRun。
+
+```ts
+interface Artifact {
+  artifactId: string;
+  boardId: string;
+  runId?: string;
+  proposalId?: string;
+  createdBy: string;
+  type: 'document' | 'code' | 'image' | 'table' | 'report' | 'data' | 'archive' | 'other';
+  title: string;
+  summary: string;
+  status: 'draft' | 'ready' | 'needs_review' | 'superseded' | 'failed';
+  mimeType?: string;
+  language?: string;
+  path?: string;
+  url?: string;
+  content?: string;
+  previewNodeIds?: string[];
+  sourceNodeIds: string[];
+  baseRevision: number;
+  createdAt: number;
+  updatedAt: number;
+}
+```
+
+Artifact 必须回答五个问题：
+
+- 这个产物是什么类型，解决哪个任务。
+- 它来自哪些节点、哪次 run 或哪个 proposal。
+- 用户应该在哪里预览、下载或继续编辑。
+- 是否已经可交付，还是需要用户 review。
+- 如果它会修改外部文件、代码仓库或第三方系统，是否已经获得授权。
+
+第一版处理原则：
+
+- 文档类产出：优先保存为 Markdown 或结构化正文，并在白板上生成一个结果节点链接到 Artifact。
+- 代码类产出：不要直接写入 main board；先作为 Artifact 或 proposal patch 展示 diff，再由 owner 确认是否应用到工作区。
+- 图片/图表类产出：保存文件路径和预览图，节点只展示缩略摘要。
+- 多文件产出：用 `archive` 或 artifact bundle 表达，避免产生一堆无法追踪的散文件。
+- 外部副作用：写文件、发消息、提交代码、创建 PR、更新飞书文档等，都必须先走授权或 owner merge。
+
 ### Merge
 
 merge 是把 proposal 沉淀到 main board 的动作。
@@ -415,6 +464,12 @@ POST   /api/boards/:boardId/flow-runs
 GET    /api/boards/:boardId/flow-runs/:runId
 POST   /api/boards/:boardId/flow-runs/:runId/resume
 POST   /api/boards/:boardId/flow-runs/:runId/cancel
+
+POST   /api/boards/:boardId/artifacts
+GET    /api/boards/:boardId/artifacts
+GET    /api/boards/:boardId/artifacts/:artifactId
+POST   /api/boards/:boardId/artifacts/:artifactId/review
+
 DELETE /api/boards/:boardId/merge-lock
 DELETE /api/boards/:boardId
 ```
@@ -434,6 +489,10 @@ DELETE /api/boards/:boardId
 - `GET /api/boards/:boardId/flow-runs/:runId`：读取流程执行状态、步骤结果和待确认事项。
 - `POST /api/boards/:boardId/flow-runs/:runId/resume`：提交用户补充、确认或授权后继续执行。
 - `POST /api/boards/:boardId/flow-runs/:runId/cancel`：取消正在执行的流程。
+- `POST /api/boards/:boardId/artifacts`：保存一次 Agent 产出物，并返回可引用的 artifact id。
+- `GET /api/boards/:boardId/artifacts`：按 board、run、proposal、source node 查询产出物。
+- `GET /api/boards/:boardId/artifacts/:artifactId`：读取产出物元数据、正文或文件引用。
+- `POST /api/boards/:boardId/artifacts/:artifactId/review`：记录 owner 对产出物的接受、退回、替换或应用决定。
 - `DELETE /api/boards/:boardId/merge-lock`：owner 强制释放 merge lock。
 - `DELETE /api/boards/:boardId`：仅 owner 可删除 board。
 
@@ -639,3 +698,5 @@ coordinator 工作模式：
 6. collaborator 是否能看到其它 Agent 的完整 proposal，还是只看到摘要。
 7. 本地 server 是否需要简单 token，防止同局域网误访问。
 8. board-specific `skill.md` 是否直接暴露完整 DSL，还是只给摘要并引导读 context API。
+9. Artifact 第一版存储在浏览器、本地文件系统，还是 server-managed workspace。
+10. 代码类 Artifact 是只做 diff preview，还是允许创建临时 worktree 后再提交 proposal。

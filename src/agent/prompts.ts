@@ -1,4 +1,4 @@
-import type { BoardDSL, BoardEditEvent } from '../types/dsl';
+import type { BoardDSL, BoardEditEvent, BoardEdge, BoardNode } from '../types/dsl';
 
 const SYSTEM_PROMPT = `You are an AgentBoard collaborator. You work with a human user to build and maintain a structured whiteboard. The whiteboard is represented as a JSON DSL (domain-specific language). Your job is to return either:
 
@@ -177,6 +177,22 @@ Each PatchOp has an "op" field and operation-specific fields:
 - If a named entity is ambiguous, return a clarification interaction_request with concrete candidate choices.
 - For research tasks, first resolve authorization and ambiguity in Activity, then put only the final synthesized result on the board.
 
+## Delta Context Packets
+
+When the user has recently edited the board, you will receive a **Context** packet instead of the full Current board DSL. A Context packet includes:
+- **changedNodes** — full node objects for all nodes the user recently created or modified. You can safely update or connect to these nodes.
+- **relatedEdges** — all edges that touch any changed node. Use these to understand how changed nodes fit into the existing graph.
+- **nearbyNodes** — direct neighbor nodes reachable through relatedEdges, excluding the changed nodes themselves. These are relevant context but were NOT recently edited.
+- **boardSummary** — compact overview of every node and edge on the board (titles, tags, endpoints). No long node bodies. Use this for orientation and to decide whether your task needs more detail.
+- **fullBoardReadPolicy** — instructions for when and how to request the full board or specific node bodies.
+
+**Important rules for delta context:**
+- The Context packet is your primary view of the board. Do not assume missing nodes are irrelevant, but default to working with the changed and nearby context.
+- When the task clearly needs global context (relayout, full-board cleanup, export, flow execution), the full Current board DSL is provided instead.
+- If you need a body or field not in the Context packet, add a question to the response and I will provide it. Do not guess.
+- Nodes in \`changedNodes\` are the ones the user most recently touched — prioritize them when choosing modification targets.
+- Use \`nearbyNodes\` and \`boardSummary\` to understand the surrounding structure before adding new nodes or edges.
+
 ## Flow Execution Commands
 
 When the user asks to "execute the flow", "run this flow", "执行流程", "执行这条流程", or similar:
@@ -220,6 +236,148 @@ function truncateBoardForPrompt(board: BoardDSL): BoardDSL {
   };
 }
 
+/** Patterns that signal the user request needs the full board, not a delta context packet. */
+const GLOBAL_REQUEST_PATTERNS = [
+  /\brelayout\b/i,
+  /全局/,
+  /整个/,
+  /全部/,
+  /整理/,
+  /重排/,
+  /\bclean\s*up\b/i,
+  /\breorgani[sz]e\b/i,
+  /\bwhole\s*board\b/i,
+  /\bfull\s*board\b/i,
+  /\ball\s*nodes\b/i,
+  /\bexport\b/i,
+  /导出/,
+  /执行流程/,
+  /\brun\s*flow\b/i,
+  /\bexecute\s*flow\b/i,
+];
+
+function isGlobalRequest(userMessage: string): boolean {
+  return GLOBAL_REQUEST_PATTERNS.some((p) => p.test(userMessage));
+}
+
+type SummaryNode = Pick<BoardNode, 'id' | 'type' | 'title' | 'tags'>;
+type SummaryEdge = Pick<BoardEdge, 'id' | 'from' | 'to' | 'label' | 'type'>;
+
+interface BoardSummary {
+  groups: { id: string; title: string; nodeIds: string[] }[];
+  nodeLabels: SummaryNode[];
+  edgeLabels: SummaryEdge[];
+}
+
+function buildBoardSummary(board: BoardDSL): BoardSummary {
+  return {
+    groups: board.groups.map((g) => ({
+      id: g.id,
+      title: g.title,
+      nodeIds: g.nodeIds,
+    })),
+    nodeLabels: board.nodes.map((n) => ({
+      id: n.id,
+      title: n.title,
+      type: n.type,
+      tags: n.tags,
+    })),
+    edgeLabels: board.edges.map((e) => ({
+      id: e.id,
+      from: e.from,
+      to: e.to,
+      label: e.label,
+      type: e.type,
+    })),
+  };
+}
+
+function summarizeNode(node: BoardNode): SummaryNode {
+  return {
+    id: node.id,
+    type: node.type,
+    title: node.title,
+    tags: node.tags,
+  };
+}
+
+function getBoardRevision(board: BoardDSL): number | null {
+  const revision = board.metadata.revision;
+  return typeof revision === 'number' ? revision : null;
+}
+
+interface ContextPacket {
+  boardId: string;
+  title: string;
+  revision: number | null;
+  counts: { nodes: number; edges: number; groups: number };
+  changedEvents: BoardEditEvent[];
+  changedNodeIds: string[];
+  changedEdgeIds: string[];
+  changedNodes: BoardNode[];
+  changedEdges: BoardEdge[];
+  relatedEdges: BoardEdge[];
+  nearbyNodes: SummaryNode[];
+  boardSummary: BoardSummary;
+  fullBoardReadPolicy: string;
+}
+
+function buildContextPacket(board: BoardDSL, editEvents: BoardEditEvent[]): ContextPacket {
+  const changedNodeIds = new Set<string>();
+  const changedEdgeIds = new Set<string>();
+
+  for (const ev of editEvents) {
+    if (ev.nodeId) changedNodeIds.add(ev.nodeId);
+    if (ev.edgeId) changedEdgeIds.add(ev.edgeId);
+  }
+
+  const changedNodeIdArr = [...changedNodeIds];
+  const changedEdgeIdArr = [...changedEdgeIds];
+
+  const changedNodes = board.nodes.filter((n) => changedNodeIds.has(n.id));
+  const changedEdges = board.edges.filter((e) => changedEdgeIds.has(e.id));
+
+  const relatedEdges = board.edges.filter(
+    (e) => changedNodeIds.has(e.from) || changedNodeIds.has(e.to) || changedEdgeIds.has(e.id),
+  );
+
+  const nearbyNodeIds = new Set<string>();
+  for (const e of relatedEdges) {
+    if (!changedNodeIds.has(e.from)) nearbyNodeIds.add(e.from);
+    if (!changedNodeIds.has(e.to)) nearbyNodeIds.add(e.to);
+  }
+  const nearbyNodes = board.nodes.filter((n) => nearbyNodeIds.has(n.id)).map(summarizeNode);
+
+  const boardSummary = buildBoardSummary(board);
+
+  const fullBoardReadPolicy =
+    'You are receiving a delta context packet focused on recently changed nodes. ' +
+    'Work from this packet for the current task. ' +
+    'If you need the full board JSON, a specific node body not in changedNodes/nearbyNodes, ' +
+    'or broader context to make a decision, add a question to the response and I will provide it. ' +
+    'Do not assume omitted nodes are irrelevant — use boardSummary.nodeLabels for orientation.';
+
+  return {
+    boardId: board.board.id,
+    title: board.board.title,
+    revision: getBoardRevision(board),
+    counts: {
+      nodes: board.nodes.length,
+      edges: board.edges.length,
+      groups: board.groups.length,
+    },
+    changedEvents: editEvents,
+    changedNodeIds: changedNodeIdArr,
+    changedEdgeIds: changedEdgeIdArr,
+    changedNodes,
+    changedEdges,
+    relatedEdges,
+    nearbyNodes,
+    boardSummary,
+    fullBoardReadPolicy,
+  };
+}
+
 /** Build the system prompt (static) */
 export function buildSystemPrompt(): string {
   return SYSTEM_PROMPT;
@@ -233,10 +391,28 @@ interface UserMessageOptions {
 
 /** Build the user message for a single agent call */
 export function buildUserMessage(board: BoardDSL, userMessage: string, options: UserMessageOptions = {}): string {
-  const truncated = truncateBoardForPrompt(board);
   const runContext = options.runContext?.length
     ? `\nRun context events:\n\`\`\`json\n${JSON.stringify(options.runContext, null, 2)}\n\`\`\`\n`
     : '';
+
+  // Delta-first path: recent edits exist and the request does NOT look global
+  const useDelta = options.recentEditEvents?.length && !isGlobalRequest(userMessage);
+
+  if (useDelta) {
+    const packet = buildContextPacket(board, options.recentEditEvents!);
+    return `Context packet (delta):
+\`\`\`json
+${JSON.stringify(packet, null, 2)}
+\`\`\`
+
+Run id: ${options.runId ?? 'run_unspecified'}${runContext}
+User request: ${userMessage}
+
+Return exactly one JSON object: either a DSLPatch if the board can be updated now, or an interaction_request if you need user choice, authorization, or clarification before continuing.`;
+  }
+
+  // Full-board path: no recent edits, or the request looks global
+  const truncated = truncateBoardForPrompt(board);
   const recentEdits = options.recentEditEvents?.length
     ? `\nRecent human edit events (what the user changed since the last agent call):\n\`\`\`json\n${JSON.stringify(options.recentEditEvents, null, 2)}\n\`\`\`\n`
     : '';
