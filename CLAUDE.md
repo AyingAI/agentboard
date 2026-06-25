@@ -52,7 +52,7 @@ src/
   data/
     initialBoard.ts      # 初始演示数据 + emptyBoard 空模板
   storage.ts             # localStorage 读写：sessions + agent config
-appBridgePlugin.ts       # Vite 插件：本地 CLI 检测 + 代理执行
+agentBridgePlugin.ts     # Vite 插件：本地 CLI 检测 + 代理执行
 ```
 
 ## 核心架构
