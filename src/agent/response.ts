@@ -2,14 +2,7 @@ import { INTERACTION_KINDS, type DSLPatch, type InteractionOption, type Interact
 import type { AgentResponse } from './types';
 
 export function extractJson(text: string): string {
-  const fenceMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/);
-  if (fenceMatch) return fenceMatch[1].trim();
-  const start = text.indexOf('{');
-  const end = text.lastIndexOf('}');
-  if (start !== -1 && end !== -1 && end > start) {
-    return text.slice(start, end + 1);
-  }
-  return text;
+  return getJsonCandidates(text)[0] ?? text;
 }
 
 function assertIsDSLPatch(obj: Record<string, unknown>): DSLPatch {
@@ -43,14 +36,102 @@ function assertIsInteractionRequest(obj: Record<string, unknown>): InteractionRe
 }
 
 export function parseAgentResponse(text: string): AgentResponse {
-  const jsonStr = extractJson(text);
-  const parsed = JSON.parse(jsonStr) as unknown;
-  if (!parsed || typeof parsed !== 'object') throw new Error('Response is not a JSON object');
+  const errors: string[] = [];
+
+  for (const candidate of getJsonCandidates(text)) {
+    try {
+      return parseAgentResponseCandidate(candidate);
+    } catch (err) {
+      errors.push(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  throw new Error(errors[0] ?? 'No JSON object found in response');
+}
+
+export function findAgentResponseJson(text: string): string | null {
+  for (const candidate of getJsonCandidates(text)) {
+    try {
+      parseAgentResponseCandidate(candidate);
+      return candidate;
+    } catch {
+      // Keep scanning. CLI output can contain unrelated JSON before the response.
+    }
+  }
+
+  return null;
+}
+
+function parseAgentResponseCandidate(candidate: string): AgentResponse {
+  const parsed = JSON.parse(candidate) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('Response is not a JSON object');
+  }
 
   const obj = parsed as Record<string, unknown>;
   if (obj.type === 'dsl_patch') return assertIsDSLPatch(obj);
   if (obj.type === 'interaction_request') return assertIsInteractionRequest(obj);
   throw new Error(`Missing or invalid "type" field: got "${String(obj.type)}"`);
+}
+
+function getJsonCandidates(text: string): string[] {
+  const candidates: string[] = [];
+  const add = (candidate: string) => {
+    const trimmed = candidate.trim();
+    if (trimmed && !candidates.includes(trimmed)) candidates.push(trimmed);
+  };
+
+  const fenceMatches = text.matchAll(/```(?:json)?\s*([\s\S]*?)```/gi);
+  for (const match of fenceMatches) add(match[1]);
+
+  for (const candidate of findBalancedJsonObjects(text)) add(candidate);
+
+  add(text);
+
+  return candidates;
+}
+
+function findBalancedJsonObjects(text: string): string[] {
+  const objects: string[] = [];
+
+  for (let start = 0; start < text.length; start += 1) {
+    if (text[start] !== '{') continue;
+
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+
+    for (let index = start; index < text.length; index += 1) {
+      const char = text[index];
+
+      if (inString) {
+        if (escaped) {
+          escaped = false;
+        } else if (char === '\\') {
+          escaped = true;
+        } else if (char === '"') {
+          inString = false;
+        }
+        continue;
+      }
+
+      if (char === '"') {
+        inString = true;
+        continue;
+      }
+      if (char === '{') {
+        depth += 1;
+      } else if (char === '}') {
+        depth -= 1;
+        if (depth === 0) {
+          objects.push(text.slice(start, index + 1));
+          break;
+        }
+      }
+    }
+  }
+
+  return objects;
 }
 
 function inferOptions(text: string): InteractionOption[] {

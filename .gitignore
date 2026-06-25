@@ -6,3 +6,21 @@ dist/
 .env.*
 docs/
 diagrams/
+
+# Local runtime history / exported board state
+.agentboard/
+agentboard.sessions*.json
+agentboard.*.json
+*.session.json
+*.sessions.json
+*.history.json
+*.history.jsonl
+*.runs.json
+*.local.json
+
+# Local logs and temporary files
+logs/
+*.log
+tmp/
+temp/
+.cache/

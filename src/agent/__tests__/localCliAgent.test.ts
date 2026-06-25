@@ -23,15 +23,16 @@ describe('local CLI recovery polling', () => {
     )).resolves.toContain('"summary":"recovered"');
   });
 
-  it('surfaces a missing server-side run with a clear message', async () => {
+  it('returns an interaction request when the server-side run is missing', async () => {
     globalThis.fetch = vi.fn().mockResolvedValue(new Response('', { status: 404 })) as unknown as typeof fetch;
 
     await expect(pollLocalCliResult(
       'missing-run',
       new AbortController().signal,
-    )).rejects.toMatchObject({
-      code: 'API_ERROR',
-      message: '本地 Agent 运行状态已丢失，请重新发送任务。',
-    });
+    )).resolves.toContain('"type":"interaction_request"');
+    await expect(pollLocalCliResult(
+      'missing-run',
+      new AbortController().signal,
+    )).resolves.toContain('本地 Agent 运行状态已丢失');
   });
 });

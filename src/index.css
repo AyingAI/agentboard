@@ -874,11 +874,11 @@ button:disabled {
   padding: 1.5px;
   background: linear-gradient(
     135deg,
-    #d7dce4,
-    #c8ced8,
-    #a0aec0,
-    #b8c0d0,
-    #d7dce4
+    #d5dce8,
+    #c3cfdf,
+    #91a5c5,
+    #afbdd4,
+    #d5dce8
   );
   background-size: 300% 300%;
   animation: composerBorderFlow 5s ease-in-out infinite;
@@ -899,11 +899,11 @@ button:disabled {
   animation-duration: 2.5s;
   background: linear-gradient(
     135deg,
-    #c8ced8,
-    #a8b4c8,
-    #8a9ab0,
-    #a8b4c8,
-    #c8ced8
+    #c3cfdf,
+    #9fb0ca,
+    #7f94b2,
+    #9fb0ca,
+    #c3cfdf
   );
   box-shadow:
     0 2px 8px rgba(31, 35, 41, 0.06),

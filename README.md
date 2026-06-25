@@ -2,6 +2,8 @@
 
 **Agent-native structured canvas** — a local-first whiteboard where humans and AI agents collaborate on the same structured board state.
 
+[中文说明](./README.zh-CN.md)
+
 ![status](https://img.shields.io/badge/status-prototype-blue)
 ![license](https://img.shields.io/badge/license-MIT-green)
 

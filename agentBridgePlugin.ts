@@ -2,6 +2,7 @@ import type { Plugin } from 'vite';
 import { execSync, spawn } from 'child_process';
 import type { ChildProcessWithoutNullStreams } from 'child_process';
 import type { IncomingMessage, ServerResponse } from 'http';
+import { findAgentResponseJson } from './src/agent/response';
 
 interface CliInfo {
   id: string;
@@ -15,9 +16,10 @@ const KNOWN_CLIS: { id: string; name: string; check: string }[] = [
   { id: 'opencode', name: 'OpenCode', check: 'which opencode' },
 ];
 
-const CLI_TIMEOUT_MS = 300_000;
+const CLI_TIMEOUT_MS = 240_000;
 const HEARTBEAT_INTERVAL_MS = 5_000;
 const RUN_RETENTION_MS = 10 * 60_000;
+const MAX_INCOMPLETE_OUTPUT_CHARS = 12_000;
 
 type StoredRun = {
   status: 'running' | 'completed' | 'failed' | 'cancelled';
@@ -151,8 +153,45 @@ function handleClaudeEvent(
   }
 }
 
+function buildTimeoutInteractionJson(requestId: string, text: string) {
+  const hasPartialOutput = text.trim().length > 0;
+  const snippet = text
+    .replace(/```json|```/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 600);
+
+  return JSON.stringify({
+    type: 'interaction_request',
+    runId: requestId,
+    kind: 'clarification',
+    title: '本地 Agent 输出过长',
+    message: hasPartialOutput
+      ? [
+          '本地 CLI 已运行到时间上限，但输出仍未形成可安全应用的完整 JSON。',
+          '我已经保留了部分输出线索。建议把这次任务拆小，例如先生成「产品定位 + 核心判断 + 目标客户」三个节点，再继续补充其它模块。',
+          snippet ? `部分输出：${snippet}` : '',
+        ].filter(Boolean).join('\n\n')
+      : '本地 CLI 已运行到时间上限且没有返回可用输出。建议缩小任务范围后重试。',
+    options: [
+      {
+        id: 'first_slice',
+        label: '先生成前三块',
+        description: '只生成产品定位、核心判断、目标客户，降低超时和 JSON 损坏概率。',
+      },
+      {
+        id: 'smaller_custom',
+        label: '我重新描述范围',
+        description: '你可以补充更小的目标，让 Agent 继续当前任务。',
+      },
+    ],
+    allowFreeText: true,
+  });
+}
+
 /** Run a CLI via stdin and stream sanitized execution events to the browser. */
 function runCLIStream(
+  requestId: string,
   cliId: string,
   systemPrompt: string,
   userMessage: string,
@@ -218,11 +257,48 @@ function runCLIStream(
     }, HEARTBEAT_INTERVAL_MS);
 
     const timeout = setTimeout(() => {
+      if (finishIfCompleteResponse()) return;
+      const text = state.resultText || state.assistantText || state.partialText;
       child.kill('SIGTERM');
-      finish(() => reject(new Error(
-        `本地 CLI 执行超时（${Math.round(CLI_TIMEOUT_MS / 1000)}s）。可以缩小任务范围后重试。`,
-      )));
+      finish(() => {
+        writeStreamEvent(res, {
+          type: 'progress',
+          event: { type: 'working', message: 'Agent 输出过长或格式不完整，已转为确认请求' },
+        });
+        resolve(buildTimeoutInteractionJson(requestId, text));
+      });
     }, CLI_TIMEOUT_MS);
+
+    const finishIfCompleteResponse = () => {
+      const text = state.resultText || state.assistantText || state.partialText;
+      const responseJson = findAgentResponseJson(text);
+      if (!responseJson) return false;
+
+      finish(() => {
+        writeStreamEvent(res, {
+          type: 'progress',
+          event: { type: 'working', message: '已获得结构化结果，正在应用到白板' },
+        });
+        child.kill('SIGTERM');
+        resolve(responseJson);
+      });
+      return true;
+    };
+
+    const finishIfOutputTooLarge = () => {
+      const text = state.resultText || state.assistantText || state.partialText;
+      if (text.length < MAX_INCOMPLETE_OUTPUT_CHARS || findAgentResponseJson(text)) return false;
+
+      finish(() => {
+        writeStreamEvent(res, {
+          type: 'progress',
+          event: { type: 'working', message: 'Agent 输出过长，已停止并请求缩小范围' },
+        });
+        child.kill('SIGTERM');
+        resolve(buildTimeoutInteractionJson(requestId, text));
+      });
+      return true;
+    };
 
     child.stdout.setEncoding('utf-8');
     child.stdout.on('data', (chunk: string) => {
@@ -240,6 +316,7 @@ function runCLIStream(
             },
           });
         }
+        if (!finishIfCompleteResponse()) finishIfOutputTooLarge();
         return;
       }
 
@@ -247,6 +324,7 @@ function runCLIStream(
       const lines = stdoutBuffer.split('\n');
       stdoutBuffer = lines.pop() ?? '';
       for (const line of lines) handleClaudeEvent(line, res, state);
+      if (!finishIfCompleteResponse()) finishIfOutputTooLarge();
     });
 
     child.stderr.setEncoding('utf-8');
@@ -348,7 +426,7 @@ async function handleRun(req: IncomingMessage, res: ServerResponse, clis: CliInf
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.flushHeaders();
 
-    const text = await runCLIStream(cliId, systemPrompt, userMessage, res, run);
+    const text = await runCLIStream(requestId, cliId, systemPrompt, userMessage, res, run);
     run.status = 'completed';
     run.text = text;
     run.child = undefined;
