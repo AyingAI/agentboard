@@ -1,4 +1,14 @@
-import type { AgentConfig, BoardDSL, DSLPatch, PatchOpType } from '../types/dsl';
+import type { AgentConfig, BoardDSL, BoardEditEvent, DSLPatch, InteractionRequest, PatchOpType, AgentRunEvent, RunState } from '../types/dsl';
+
+export type AgentProgressEventType = 'connected' | 'working' | 'tool' | 'output' | 'heartbeat';
+
+export interface AgentProgressEvent {
+  type: AgentProgressEventType;
+  message: string;
+  detail?: string;
+  elapsedMs?: number;
+  outputChars?: number;
+}
 
 /** Input to an agent adapter */
 export interface AgentRequest {
@@ -6,22 +16,33 @@ export interface AgentRequest {
   userMessage: string;
   selectedNodeIds?: string[];
   allowedOps?: PatchOpType[];
+  runId?: string;
+  runContext?: AgentRunEvent[];
+  /** Recent human edits to the board since the last agent call */
+  recentEditEvents?: BoardEditEvent[];
+  /** Abort signal to cancel an in-flight call (user pressed stop, timeout). */
+  signal?: AbortSignal;
+  /** User-facing execution events. Never includes hidden reasoning or raw tool inputs. */
+  onProgress?: (event: AgentProgressEvent) => void;
 }
+
+export type AgentResponse = DSLPatch | InteractionRequest;
 
 /** Structured error from agent call */
 export interface AgentError {
-  code: 'NETWORK_ERROR' | 'AUTH_ERROR' | 'RATE_LIMITED' | 'API_ERROR' | 'PARSE_ERROR';
+  code: 'NETWORK_ERROR' | 'STREAM_ERROR' | 'AUTH_ERROR' | 'RATE_LIMITED' | 'API_ERROR' | 'PARSE_ERROR' | 'TIMEOUT' | 'ABORTED';
   message: string;
   /** Raw response text for debugging parse errors */
   rawText?: string;
+  /** Whether retrying may succeed. Defaults inferred from code when omitted. */
+  retryable?: boolean;
 }
 
 /** Abstract agent adapter — mock and real implementations conform to this */
 export interface AgentAdapter {
   readonly name: string;
-  /** Generate a DSLPatch from user message + board state.
-   *  Throws AgentError on failures; returns a patch to be validated by caller. */
-  generatePatch(request: AgentRequest): Promise<DSLPatch>;
+  generateResponse(request: AgentRequest): Promise<AgentResponse>;
 }
 
-export type { AgentConfig };
+// Re-export shared types so callers can import from one place
+export type { AgentConfig, AgentRunEvent, RunState };

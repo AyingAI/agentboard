@@ -1,41 +1,11 @@
-import type { DSLPatch } from '../types/dsl';
-import type { AgentAdapter, AgentError, AgentRequest } from './types';
+import type { AgentAdapter, AgentError, AgentProgressEvent, AgentRequest } from './types';
 import { buildSystemPrompt, buildUserMessage } from './prompts';
+import { fallbackInteractionFromText, parseAgentResponse } from './response';
+import { mapAbortError, withTimeout } from './resilience';
+import { consumeAgentStream } from './stream';
 
-/** Extract JSON from text, handling markdown code fences */
-function extractJson(text: string): string {
-  const fenceMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/);
-  if (fenceMatch) return fenceMatch[1].trim();
-  const start = text.indexOf('{');
-  const end = text.lastIndexOf('}');
-  if (start !== -1 && end !== -1 && end > start) {
-    return text.slice(start, end + 1);
-  }
-  return text;
-}
-
-/** Validate that a parsed object looks like a DSLPatch */
-function assertIsDSLPatch(obj: unknown): DSLPatch {
-  if (!obj || typeof obj !== 'object') {
-    throw new Error('Response is not a JSON object');
-  }
-  const patch = obj as Record<string, unknown>;
-  if (patch.type !== 'dsl_patch') {
-    throw new Error(`Missing or invalid "type" field: expected "dsl_patch", got "${String(patch.type)}"`);
-  }
-  if (typeof patch.summary !== 'string') {
-    throw new Error('Missing or invalid "summary" field');
-  }
-  if (!Array.isArray(patch.ops)) {
-    throw new Error('Missing or invalid "ops" array');
-  }
-  return {
-    type: 'dsl_patch',
-    summary: patch.summary as string,
-    ops: patch.ops as DSLPatch['ops'],
-    questions: Array.isArray(patch.questions) ? (patch.questions as string[]) : [],
-  };
-}
+const LOCAL_CLI_TIMEOUT_MS = 300_000;
+const POLL_INTERVAL_MS = 1_000;
 
 interface CliInfo {
   id: string;
@@ -56,38 +26,126 @@ async function fetchCLIs(): Promise<CliInfo[]> {
 }
 
 /** Run a prompt through a local CLI via the dev server bridge */
-async function runLocalCli(cliId: string, systemPrompt: string, userMessage: string): Promise<string> {
+async function runLocalCli(
+  cliId: string,
+  systemPrompt: string,
+  userMessage: string,
+  externalSignal?: AbortSignal,
+  requestProgress?: (event: AgentProgressEvent) => void,
+): Promise<string> {
   let res: Response;
+  const { signal, cleanup } = withTimeout(externalSignal, LOCAL_CLI_TIMEOUT_MS);
+  const requestId = crypto.randomUUID();
+  const cancelServerRun = () => {
+    void fetch(`/api/agent/run/${encodeURIComponent(requestId)}`, {
+      method: 'DELETE',
+      keepalive: true,
+    }).catch(() => undefined);
+  };
+  signal.addEventListener('abort', cancelServerRun, { once: true });
   try {
     res = await fetch('/api/agent/run', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ cliId, systemPrompt, userMessage }),
+      body: JSON.stringify({ requestId, cliId, systemPrompt, userMessage }),
+      signal,
     });
-  } catch {
-    throw {
-      code: 'NETWORK_ERROR',
-      message: '无法连接到本地 CLI 桥接服务。请确认 dev server 正在运行（npm run dev）。',
-    } satisfies AgentError;
-  }
 
-  if (!res.ok) {
-    let errorMsg = `Server error (${res.status})`;
+    if (!res.ok) {
+      let errorMsg = `Server error (${res.status})`;
+      try {
+        const body = await res.json();
+        if (body.error) errorMsg = body.error;
+      } catch { /* ignore */ }
+      throw {
+        code: 'API_ERROR',
+        message: `本地 CLI 调用失败：${errorMsg}`,
+      } satisfies AgentError;
+    }
+
     try {
-      const body = await res.json();
-      if (body.error) errorMsg = body.error;
-    } catch { /* ignore */ }
-    throw {
-      code: 'API_ERROR',
-      message: `本地 CLI 调用失败：${errorMsg}`,
-    } satisfies AgentError;
+      return await consumeAgentStream(res, requestProgress);
+    } catch (err) {
+      if ((err as AgentError)?.code !== 'STREAM_ERROR') throw err;
+      requestProgress?.({
+        type: 'working',
+        message: '实时连接中断，Agent 仍在后台执行',
+        detail: '正在恢复连接并查询最终结果。',
+      });
+      return await pollLocalCliResult(requestId, signal, requestProgress);
+    }
+  } catch (err) {
+    if ((err as AgentError)?.code) throw err;
+    throw mapAbortError(signal, '无法连接到本地 CLI 桥接服务。请确认 dev server 正在运行（npm run dev）。');
+  } finally {
+    signal.removeEventListener('abort', cancelServerRun);
+    cleanup();
+  }
+}
+
+export async function pollLocalCliResult(
+  requestId: string,
+  signal: AbortSignal,
+  onProgress?: (event: AgentProgressEvent) => void,
+): Promise<string> {
+  while (!signal.aborted) {
+    let response: Response;
+    try {
+      response = await fetch(`/api/agent/run/${encodeURIComponent(requestId)}`, { signal });
+    } catch {
+      if (signal.aborted) throw mapAbortError(signal, '本地 Agent 查询已中断。');
+      await wait(POLL_INTERVAL_MS, signal);
+      continue;
+    }
+
+    if (response.status === 404) {
+      throw {
+        code: 'API_ERROR',
+        message: '本地 Agent 运行状态已丢失，请重新发送任务。',
+      } satisfies AgentError;
+    }
+    if (!response.ok) {
+      throw {
+        code: 'API_ERROR',
+        message: `查询本地 Agent 结果失败（${response.status}）。`,
+      } satisfies AgentError;
+    }
+
+    const body = await response.json() as {
+      status: 'running' | 'completed' | 'failed' | 'cancelled';
+      text?: string;
+      error?: string;
+    };
+    if (body.status === 'completed' && typeof body.text === 'string') return body.text;
+    if (body.status === 'failed' || body.status === 'cancelled') {
+      throw {
+        code: 'API_ERROR',
+        message: body.error || (body.status === 'cancelled' ? '本地 Agent 已取消。' : '本地 Agent 执行失败。'),
+      } satisfies AgentError;
+    }
+
+    onProgress?.({
+      type: 'heartbeat',
+      message: '连接恢复中，Agent 仍在后台执行',
+    });
+    await wait(POLL_INTERVAL_MS, signal);
   }
 
-  const body = await res.json();
-  if (body.error) {
-    throw { code: 'API_ERROR', message: body.error } satisfies AgentError;
-  }
-  return body.text as string;
+  throw mapAbortError(signal, '本地 Agent 查询已中断。');
+}
+
+function wait(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(mapAbortError(signal, '本地 Agent 查询已中断。'));
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
 }
 
 /** Local CLI adapter — calls a local agent CLI through the Vite dev server */
@@ -98,26 +156,36 @@ export class LocalCliAdapter implements AgentAdapter {
     this.name = `Local: ${cliId}`;
   }
 
-  async generatePatch(request: AgentRequest): Promise<DSLPatch> {
+  async generateResponse(request: AgentRequest) {
     const systemPrompt = buildSystemPrompt();
-    const userMessage = buildUserMessage(request.boardState, request.userMessage);
+    const userMessage = buildUserMessage(request.boardState, request.userMessage, {
+      runId: request.runId,
+      runContext: request.runContext,
+      recentEditEvents: request.recentEditEvents,
+    });
 
     let text: string;
     try {
-      text = await runLocalCli(this.cliId, systemPrompt, userMessage);
+      text = await runLocalCli(
+        this.cliId,
+        systemPrompt,
+        userMessage,
+        request.signal,
+        request.onProgress,
+      );
     } catch (err) {
-      // Network / API errors already have code, re-throw
+      // Network / API / abort errors already have code, re-throw
       throw err;
     }
 
     try {
-      const jsonStr = extractJson(text);
-      const parsed = JSON.parse(jsonStr) as unknown;
-      return assertIsDSLPatch(parsed);
+      return parseAgentResponse(text);
     } catch (err) {
+      const interaction = fallbackInteractionFromText(text, request.runId ?? `run_${Date.now()}`);
+      if (interaction) return interaction;
       throw {
         code: 'PARSE_ERROR',
-        message: `无法解析 ${this.cliId} 的输出为 DSLPatch：${err instanceof Error ? err.message : String(err)}`,
+        message: `无法解析 ${this.cliId} 的输出为 AgentBoard 响应：${err instanceof Error ? err.message : String(err)}`,
         rawText: text.slice(0, 2000),
       } satisfies AgentError;
     }

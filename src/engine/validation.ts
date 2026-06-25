@@ -1,4 +1,4 @@
-import type { BoardDSL, BoardNode, BoardEdge, ValidationError } from '../types/dsl';
+import type { BoardDSL, BoardNode, BoardEdge, BoardGroup, ValidationError } from '../types/dsl';
 
 /** Validate a complete board DSL - checks structural integrity */
 export function validateBoard(board: BoardDSL): ValidationError[] {
@@ -147,6 +147,37 @@ export function validateEdge(edge: Partial<BoardEdge> & { id?: string }, nodeIds
     errors.push({ code: 'EDGE_MISSING_TO', message: `连线 "${edge.id}" 缺少 to`, refId: edge.id });
   } else if (!nodeIds.has(edge.to)) {
     errors.push({ code: 'EDGE_INVALID_TO', message: `连线 "${edge.id}" 的 to "${edge.to}" 不存在`, refId: edge.id });
+  }
+  return errors;
+}
+
+/** Validate a single group (for add/update). Checks id, title, nodeIds array, and node refs. */
+export function validateGroup(
+  group: Partial<BoardGroup> & { id?: string },
+  nodeIds: Set<string>,
+  checkId = true,
+): ValidationError[] {
+  const errors: ValidationError[] = [];
+  if (checkId && !group.id) {
+    errors.push({ code: 'GROUP_MISSING_ID', message: '分组缺少 id' });
+  }
+  if (group.title !== undefined && !group.title.trim()) {
+    errors.push({ code: 'GROUP_MISSING_TITLE', message: `分组 "${group.id}" 缺少标题`, refId: group.id });
+  }
+  if (group.nodeIds !== undefined) {
+    if (!Array.isArray(group.nodeIds)) {
+      errors.push({ code: 'GROUP_NODE_IDS_NOT_ARRAY', message: `分组 "${group.id}" 的 nodeIds 必须是数组`, refId: group.id });
+    } else {
+      for (const containedId of group.nodeIds) {
+        if (!nodeIds.has(containedId)) {
+          errors.push({
+            code: 'GROUP_INVALID_REF',
+            message: `分组 "${group.id}" 引用了不存在的节点 "${containedId}"`,
+            refId: group.id,
+          });
+        }
+      }
+    }
   }
   return errors;
 }

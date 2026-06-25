@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react';
-import type { BoardDSL, BoardSession } from '../types/dsl';
-import { initialBoard, emptyBoard } from '../data/initialBoard';
+import type { ActivityEntry, BoardDSL, BoardSession, RunState } from '../types/dsl';
+import { emptyBoard } from '../data/initialBoard';
 import { loadSessions, saveSessions } from '../storage';
 
 function makeId(): string {
@@ -95,6 +95,18 @@ export function useBoardSessions() {
     updateActiveBoard(fresh);
   }, [activeSession?.title, updateActiveBoard]);
 
+  const updateActiveAgentState = useCallback(
+    (activities: ActivityEntry[], runs: Record<string, RunState>) => {
+      persist({
+        sessions: data.sessions.map((s) =>
+          s.id === data.activeId ? { ...s, activities, runs } : s,
+        ),
+        activeId: data.activeId,
+      });
+    },
+    [data, persist],
+  );
+
   return {
     sessions,
     activeId,
@@ -104,6 +116,7 @@ export function useBoardSessions() {
     renameSession,
     deleteSession,
     updateActiveBoard,
+    updateActiveAgentState,
     resetBoard,
   };
 }

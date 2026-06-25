@@ -45,12 +45,14 @@ describe('ClaudeAgentAdapter', () => {
     ) as unknown as typeof fetch;
 
     const adapter = new ClaudeAgentAdapter({ provider: 'claude', apiKey: 'test-key', model: 'claude-opus-4-20250514' });
-    const patch = await adapter.generatePatch({ boardState: testBoard(), userMessage: 'add a node' });
+    const patch = await adapter.generateResponse({ boardState: testBoard(), userMessage: 'add a node' });
 
     expect(patch.type).toBe('dsl_patch');
-    expect(patch.summary).toBe('Added a node');
-    expect(patch.ops).toHaveLength(1);
-    expect(patch.ops[0]).toMatchObject({ op: 'add_node' });
+    if (patch.type === 'dsl_patch') {
+      expect(patch.summary).toBe('Added a node');
+      expect(patch.ops).toHaveLength(1);
+      expect(patch.ops[0]).toMatchObject({ op: 'add_node' });
+    }
   });
 
   it('should extract JSON from markdown code fences', async () => {
@@ -59,15 +61,48 @@ describe('ClaudeAgentAdapter', () => {
     ) as unknown as typeof fetch;
 
     const adapter = new ClaudeAgentAdapter({ provider: 'claude', apiKey: 'test-key' });
-    const patch = await adapter.generatePatch({ boardState: testBoard(), userMessage: 'test' });
+    const patch = await adapter.generateResponse({ boardState: testBoard(), userMessage: 'test' });
 
-    expect(patch.summary).toBe('From fence');
+    expect(patch.type).toBe('dsl_patch');
+    if (patch.type === 'dsl_patch') {
+      expect(patch.summary).toBe('From fence');
+    }
+  });
+
+  it('should return interaction_request when agent needs user input', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      mockAnthropicResponse(JSON.stringify({
+        type: 'interaction_request',
+        runId: 'run_test',
+        kind: 'choice',
+        title: '需要确认 Hermes 指代',
+        message: '你说的 Hermes 是 Nous Research Hermes 还是某个产品？',
+        options: [
+          { id: 'option_1', label: 'Nous Research Hermes' },
+          { id: 'option_2', label: '其他产品' },
+        ],
+        allowFreeText: true,
+      })),
+    ) as unknown as typeof fetch;
+
+    const adapter = new ClaudeAgentAdapter({ provider: 'claude', apiKey: 'test-key' });
+    const response = await adapter.generateResponse({
+      boardState: testBoard(),
+      userMessage: 'research Hermes',
+      runId: 'run_test',
+    });
+
+    expect(response.type).toBe('interaction_request');
+    if (response.type === 'interaction_request') {
+      expect(response.kind).toBe('choice');
+      expect(response.options).toHaveLength(2);
+    }
   });
 
   it('should throw AUTH_ERROR when API key is missing', async () => {
     const adapter = new ClaudeAgentAdapter({ provider: 'claude' });
     try {
-      await adapter.generatePatch({ boardState: testBoard(), userMessage: 'test' });
+      await adapter.generateResponse({ boardState: testBoard(), userMessage: 'test' });
       expect.unreachable('should have thrown');
     } catch (err) {
       expect((err as AgentError).code).toBe('AUTH_ERROR');
@@ -82,7 +117,7 @@ describe('ClaudeAgentAdapter', () => {
 
     const adapter = new ClaudeAgentAdapter({ provider: 'claude', apiKey: 'bad-key' });
     try {
-      await adapter.generatePatch({ boardState: testBoard(), userMessage: 'test' });
+      await adapter.generateResponse({ boardState: testBoard(), userMessage: 'test' });
       expect.unreachable('should have thrown');
     } catch (err) {
       expect((err as AgentError).code).toBe('AUTH_ERROR');
@@ -97,7 +132,7 @@ describe('ClaudeAgentAdapter', () => {
 
     const adapter = new ClaudeAgentAdapter({ provider: 'claude', apiKey: 'key' });
     try {
-      await adapter.generatePatch({ boardState: testBoard(), userMessage: 'test' });
+      await adapter.generateResponse({ boardState: testBoard(), userMessage: 'test' });
       expect.unreachable('should have thrown');
     } catch (err) {
       expect((err as AgentError).code).toBe('RATE_LIMITED');
@@ -111,7 +146,7 @@ describe('ClaudeAgentAdapter', () => {
 
     const adapter = new ClaudeAgentAdapter({ provider: 'claude', apiKey: 'key' });
     try {
-      await adapter.generatePatch({ boardState: testBoard(), userMessage: 'test' });
+      await adapter.generateResponse({ boardState: testBoard(), userMessage: 'test' });
       expect.unreachable('should have thrown');
     } catch (err) {
       expect((err as AgentError).code).toBe('PARSE_ERROR');
@@ -125,7 +160,7 @@ describe('ClaudeAgentAdapter', () => {
 
     const adapter = new ClaudeAgentAdapter({ provider: 'claude', apiKey: 'key' });
     try {
-      await adapter.generatePatch({ boardState: testBoard(), userMessage: 'test' });
+      await adapter.generateResponse({ boardState: testBoard(), userMessage: 'test' });
       expect.unreachable('should have thrown');
     } catch (err) {
       expect((err as AgentError).code).toBe('PARSE_ERROR');
@@ -137,7 +172,7 @@ describe('ClaudeAgentAdapter', () => {
 
     const adapter = new ClaudeAgentAdapter({ provider: 'claude', apiKey: 'key' });
     try {
-      await adapter.generatePatch({ boardState: testBoard(), userMessage: 'test' });
+      await adapter.generateResponse({ boardState: testBoard(), userMessage: 'test' });
       expect.unreachable('should have thrown');
     } catch (err) {
       expect((err as AgentError).code).toBe('NETWORK_ERROR');
