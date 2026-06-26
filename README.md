@@ -1,39 +1,39 @@
 # AgentBoard
 
-**Agent-native structured canvas** — a local-first whiteboard where humans and AI agents collaborate on the same structured board state.
+**Agent-native structured canvas** — 一个 local-first 的结构化白板，让人和 AI Agent 围绕同一份白板状态协作。
 
-[中文说明](./README.zh-CN.md)
+[English README](./README.en.md)
 
 ![status](https://img.shields.io/badge/status-prototype-blue)
 ![license](https://img.shields.io/badge/license-MIT-green)
 
-AgentBoard turns a conversation with an agent into an editable canvas. The user can ask for a product breakdown, workflow, architecture map, or decision tree; the agent responds with structured board operations; the user can then move cards, edit text, create connections, and continue the conversation from the updated board.
+AgentBoard 把和 Agent 的对话变成一张可编辑画布。用户可以让 Agent 拆解产品、梳理 workflow、画架构图或决策树；Agent 返回结构化白板操作；用户再移动卡片、编辑文字、创建连线，并基于更新后的白板继续对话。
 
-## What It Does
+## 它能做什么
 
-- Creates editable cards, notes, groups, and edges from natural language.
-- Stores the board as a structured `BoardDSL`, not as a flat image.
-- Applies agent output through validated `DSLPatch` operations.
-- Lets agents read recent human edits through a delta-first context packet instead of always receiving the full board.
-- Supports local CLI agents such as Claude Code and OpenCode through a Vite dev-server bridge.
-- Supports Claude API and OpenAI-compatible APIs.
-- Persists sessions and agent settings locally in `localStorage`.
+- 用自然语言创建可编辑的卡片、便签、分组和连线。
+- 白板以结构化 `BoardDSL` 存储，而不是一张扁平图片。
+- Agent 输出通过经过校验的 `DSLPatch` 操作应用到白板。
+- Agent 可以读取最近的人类编辑增量，不必每次都读取完整白板。
+- 通过 Vite 开发服务器桥接本地 CLI Agent，例如 Claude Code 和 OpenCode。
+- 支持 Claude API 和 OpenAI 兼容 API。
+- 白板 session 和 Agent 设置保存在本机浏览器 `localStorage`。
 
-## Why It Exists
+## 为什么需要它
 
-Most agent products lose context in a long chat transcript. AgentBoard uses the canvas itself as shared external memory:
+很多 Agent 产品会把上下文丢在冗长聊天记录里。AgentBoard 用画布本身作为共享的外部记忆：
 
 ```txt
-Human intent
-  -> agent plans structured board changes
-  -> AgentBoard validates and applies a DSLPatch
-  -> human edits the visible canvas
-  -> agent reads the updated structure and recent edits
+人的意图
+  -> Agent 规划结构化白板变更
+  -> AgentBoard 校验并应用 DSLPatch
+  -> 人编辑可见画布
+  -> Agent 读取更新后的结构和最近编辑
 ```
 
-The important part is not "AI draws a diagram"; it is that both the human and the agent keep working on the same structured object.
+关键不是“AI 画了一张图”，而是人和 Agent 一直在操作同一个结构化对象。
 
-## Quick Start
+## 快速开始
 
 ```bash
 git clone https://github.com/AyingAI/agentboard.git
@@ -42,35 +42,35 @@ npm install
 npm run dev
 ```
 
-Open `http://localhost:5173`.
+打开 `http://localhost:5173`。
 
-Then choose an agent provider from the settings panel:
+然后在设置面板选择 Agent 提供方：
 
-- **Local CLI**: auto-detects supported local CLIs such as Claude Code or OpenCode.
-- **Claude API**: use an Anthropic API key.
-- **OpenAI-compatible API**: use OpenAI or a compatible base URL.
+- **Local CLI**：自动检测 Claude Code、OpenCode 等本地 CLI。
+- **Claude API**：使用 Anthropic API key。
+- **OpenAI-compatible API**：使用 OpenAI 或兼容的 base URL。
 
-API keys are stored only in browser `localStorage`. Do not commit secrets into the repository.
+API key 只保存在浏览器 `localStorage`。不要把 secrets 提交到仓库。
 
-## Canvas Basics
+## 画布基础操作
 
-| Action | Interaction |
+| 操作 | 交互 |
 | --- | --- |
-| Create card | Double-click empty canvas |
-| Move card | Drag |
-| Edit card text | Double-click title or body |
-| Create edge | Select a node, drag a connector handle to another node |
-| Edit edge label | Select or double-click the edge label |
-| Delete selection | Delete or Backspace |
-| Pan canvas | Space + drag, or middle mouse drag |
+| 创建卡片 | 双击画布空白处 |
+| 移动卡片 | 拖拽 |
+| 编辑卡片文字 | 双击标题或正文 |
+| 创建连线 | 选中节点，拖拽连接点到另一个节点 |
+| 编辑连线标签 | 选中或双击连线标签 |
+| 删除选中内容 | Delete 或 Backspace |
+| 平移画布 | Space + 拖拽，或鼠标中键拖拽 |
 
-## Core Protocol
+## 核心协议
 
-AgentBoard is built around a small board protocol.
+AgentBoard 围绕一个很小的白板协议构建。
 
 ### `BoardDSL`
 
-`BoardDSL` is the source of truth for the visible board:
+`BoardDSL` 是可见白板的事实来源：
 
 ```ts
 type BoardDSL = {
@@ -85,7 +85,7 @@ type BoardDSL = {
 
 ### `DSLPatch`
 
-Agents do not mutate the board directly. They return a patch:
+Agent 不直接修改白板。它返回一个 patch：
 
 ```ts
 type DSLPatch = {
@@ -96,24 +96,24 @@ type DSLPatch = {
 };
 ```
 
-Supported operations include `add_node`, `update_node`, `delete_node`, `add_edge`, `delete_edge`, `add_group`, `update_group`, `delete_group`, and `layout`.
+支持的操作包括 `add_node`、`update_node`、`delete_node`、`add_edge`、`delete_edge`、`add_group`、`update_group`、`delete_group` 和 `layout`。
 
-Every patch is validated before it is applied. Invalid references, duplicate IDs, invalid geometry, or schema mismatches fail atomically.
+每个 patch 都会先校验再应用。无效引用、重复 ID、无效几何信息或 schema 不匹配都会让 patch 原子失败，不会留下半更新状态。
 
-### Delta Context Packets
+### 增量上下文包
 
-When the user edits the board and then calls an agent again, AgentBoard sends a compact delta context by default:
+当用户编辑白板后再次调用 Agent，AgentBoard 默认发送紧凑的增量上下文：
 
-- changed edit events
-- changed node IDs and edge IDs
-- full objects for changed nodes
-- edges related to changed nodes
-- lightweight nearby node summaries
-- compact board summary
+- 已变化的编辑事件
+- 已变化的节点 ID 和连线 ID
+- 已变化节点的完整对象
+- 与变化节点相关的连线
+- 附近节点的轻量摘要
+- 紧凑的白板摘要
 
-Global tasks such as full-board cleanup, export, or flow execution still receive full board context.
+全局任务，例如整图整理、导出或流程执行，仍然会接收完整白板上下文。
 
-## Architecture
+## 架构
 
 ```txt
 React app
@@ -127,43 +127,43 @@ React app
         └── OpenAI-compatible API
 ```
 
-Project layout:
+项目结构：
 
 ```txt
 src/
-  types/dsl.ts           # protocol and shared types
-  engine/                # patch application and validation
-  agent/                 # adapters, prompts, parsing, resilience
-  hooks/                 # React state, dragging, panning, sessions
-  components/            # canvas and UI components
-  data/                  # initial board templates
-  storage.ts             # localStorage persistence
-agentBridgePlugin.ts     # Vite middleware for local CLI execution
+  types/dsl.ts           # 协议和共享类型
+  engine/                # patch 应用和校验
+  agent/                 # 适配器、prompt、解析、韧性处理
+  hooks/                 # React 状态、拖拽、平移、session
+  components/            # 画布和 UI 组件
+  data/                  # 初始白板模板
+  storage.ts             # localStorage 持久化
+agentBridgePlugin.ts     # 用于本地 CLI 执行的 Vite middleware
 ```
 
-## Development
+## 开发
 
 ```bash
-npm run dev        # start Vite dev server
-npm run typecheck  # TypeScript validation
-npm run test       # Vitest suite
-npm run build      # production build
+npm run dev        # 启动 Vite 开发服务器
+npm run typecheck  # TypeScript 校验
+npm run test       # Vitest 测试
+npm run build      # 生产构建
 ```
 
-## Current Status
+## 当前状态
 
-AgentBoard is a prototype. It is useful for experimenting with structured agent collaboration, but it is not yet a hosted multi-user product.
+AgentBoard 仍是原型。它适合用于实验结构化 Agent 协作，但还不是一个托管式多人产品。
 
-Current boundaries:
+当前边界：
 
-- Local-first storage only.
-- No server-backed account, permission, or sync model.
-- Local CLI bridge runs only in the Vite development server.
-- External side effects should stay explicit and user-authorized.
+- 仅支持 local-first 存储。
+- 没有服务端账号、权限或同步模型。
+- 本地 CLI bridge 只在 Vite 开发服务器中运行。
+- 外部副作用应保持显式，并由用户授权。
 
-## Contributing
+## 贡献
 
-Issues and pull requests are welcome. Before submitting changes, run:
+欢迎提交 issue 和 pull request。提交变更前请运行：
 
 ```bash
 npm run typecheck
@@ -171,7 +171,7 @@ npm run test
 npm run build
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
+贡献指南见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
 ## License
 
