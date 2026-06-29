@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import type { BoardDSL } from '../../types/dsl';
-import { buildSystemPrompt, buildUserMessage } from '../prompts';
+import type { BoardDSL, DSLPatch } from '../../types/dsl';
+import {
+  buildSystemPrompt,
+  buildUserMessage,
+  inferLayoutIntent,
+  normalizePatchForLayoutIntent,
+  normalizePatchForUserIntent,
+} from '../prompts';
 
 function makeBoard(nodeCount: number): BoardDSL {
   const nodes = Array.from({ length: nodeCount }, (_, i) => ({
@@ -108,6 +114,24 @@ describe('buildUserMessage', () => {
     });
     expect(msg).toContain('Run context events');
     expect(msg).toContain('授权搜索');
+  });
+
+  it('should include layout intent preflight for flowchart requests', () => {
+    const board = makeBoard(2);
+    const msg = buildUserMessage(board, '请把当前内容整理成流程图', { runId: 'run_flowchart' });
+
+    expect(msg).toContain('Layout intent preflight');
+    expect(msg).toContain('"kind": "flowchart"');
+    expect(msg).toContain('"algorithm": "dagre"');
+    expect(msg).toContain('"scope": "all"');
+  });
+
+  it('should not treat flow execution commands as layout requests', () => {
+    const board = makeBoard(2);
+    const msg = buildUserMessage(board, '执行流程', { runId: 'run_execute_flow' });
+
+    expect(msg).not.toContain('Layout intent preflight');
+    expect(inferLayoutIntent('执行流程')).toBeNull();
   });
 
   it('should include recent human edit events when provided', () => {
@@ -236,5 +260,136 @@ describe('buildUserMessage', () => {
     const originalBody = board.nodes[0].body;
     buildUserMessage(board, 'test');
     expect(board.nodes[0].body).toBe(originalBody);
+  });
+});
+
+describe('normalizePatchForLayoutIntent', () => {
+  it('should append the recommended layout for explicit flowchart requests', () => {
+    const patch: DSLPatch = {
+      type: 'dsl_patch',
+      summary: 'create flow',
+      ops: [
+        {
+          op: 'add_node',
+          node: {
+            id: 'n_new',
+            type: 'card',
+            x: 100,
+            y: 100,
+            width: 240,
+            height: 120,
+            title: 'Start',
+            body: '',
+          },
+        },
+      ],
+    };
+
+    const normalized = normalizePatchForLayoutIntent(patch, '画一个用户注册流程图');
+
+    expect(normalized.ops).toHaveLength(2);
+    expect(normalized.ops[1]).toEqual({ op: 'layout', algorithm: 'dagre', scope: 'all' });
+  });
+
+  it('should replace an unsuitable layout on explicit flowchart requests', () => {
+    const patch: DSLPatch = {
+      type: 'dsl_patch',
+      summary: 'wrong layout',
+      ops: [{ op: 'layout', algorithm: 'mindmap', scope: 'changed' }],
+    };
+
+    const normalized = normalizePatchForLayoutIntent(patch, '把全部节点改成流程图');
+
+    expect(normalized.ops[0]).toEqual({ op: 'layout', algorithm: 'dagre', scope: 'all' });
+  });
+});
+
+describe('normalizePatchForUserIntent', () => {
+  const deepDiveMessage = [
+    '请基于当前选中的单个节点做深度研究和扩展，不要把整张白板重新生成或重排。',
+    '',
+    '目标节点 ID: n0',
+    '目标节点标题: Node 0',
+    '',
+    '我的深挖需求: 补充相关证据',
+  ].join('\n');
+
+  it('should connect deep-dive added nodes back to the target with line edges', () => {
+    const patch: DSLPatch = {
+      type: 'dsl_patch',
+      summary: 'deep dive',
+      ops: [
+        {
+          op: 'add_node',
+          node: {
+            id: 'n_evidence',
+            type: 'note',
+            x: 420,
+            y: 160,
+            width: 240,
+            height: 120,
+            title: 'Evidence',
+            body: '',
+          },
+        },
+      ],
+    };
+
+    const normalized = normalizePatchForUserIntent(patch, deepDiveMessage, makeBoard(1));
+
+    expect(normalized.ops).toHaveLength(2);
+    expect(normalized.ops[1]).toEqual({
+      op: 'add_edge',
+      edge: {
+        id: 'edge_n0_n_evidence',
+        from: 'n0',
+        to: 'n_evidence',
+        type: 'line',
+      },
+    });
+  });
+
+  it('should turn deep-dive arrows between target and new nodes into plain lines', () => {
+    const patch: DSLPatch = {
+      type: 'dsl_patch',
+      summary: 'deep dive with arrow',
+      ops: [
+        {
+          op: 'add_node',
+          node: {
+            id: 'n_context',
+            type: 'card',
+            x: 420,
+            y: 160,
+            width: 240,
+            height: 120,
+            title: 'Context',
+            body: '',
+          },
+        },
+        {
+          op: 'add_edge',
+          edge: {
+            id: 'edge_n0_n_context',
+            from: 'n0',
+            to: 'n_context',
+            type: 'arrow',
+          },
+        },
+      ],
+    };
+
+    const normalized = normalizePatchForUserIntent(patch, deepDiveMessage, makeBoard(1));
+
+    expect(normalized.ops).toHaveLength(2);
+    expect(normalized.ops[1]).toEqual({
+      op: 'add_edge',
+      edge: {
+        id: 'edge_n0_n_context',
+        from: 'n0',
+        to: 'n_context',
+        type: 'line',
+      },
+    });
   });
 });

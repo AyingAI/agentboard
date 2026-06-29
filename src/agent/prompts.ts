@@ -1,4 +1,4 @@
-import type { BoardDSL, BoardEditEvent, BoardEdge, BoardNode } from '../types/dsl';
+import type { BoardDSL, BoardEditEvent, BoardEdge, BoardNode, DSLPatch, LayoutAlgorithm } from '../types/dsl';
 
 const SYSTEM_PROMPT = `You are an AgentBoard collaborator. You work with a human user to build and maintain a structured whiteboard. The whiteboard is represented as a JSON DSL (domain-specific language). Your job is to return either:
 
@@ -141,6 +141,7 @@ Each PatchOp has an "op" field and operation-specific fields:
    \`{ "op": "layout", "algorithm": "horizontal" | "vertical" | "dagre" | "mindmap" | "matrix" | "cluster" | "timeline" | "swimlane", "scope": "changed" | "all" }\`
    - Default scope is "changed": only move nodes added or geometrically changed in the current patch.
    - Use scope "all" only when the user explicitly asks to reorganize, clean up, or relayout the whole board.
+   - If a Layout intent preflight is provided in the user message, treat its recommended algorithm and scope as product guidance and follow it unless it conflicts with a higher-priority user instruction.
    - "horizontal" — sequence, timeline, or left-to-right comparison
    - "vertical" — ordered list, backlog, priority stack, decision ladder
    - "dagre" — dependency graph, architecture, hierarchy, data flow
@@ -159,6 +160,7 @@ Each PatchOp has an "op" field and operation-specific fields:
 - Keep the board clean and readable. Don't add redundant nodes.
 - Preserve the current layout by default. Existing node x/y positions are user context, so do not move existing nodes unless the user explicitly asks for a full-board cleanup or relayout.
 - Before adding nodes, infer the best visual structure for the user's intent. Do not default to a flowchart.
+- If the user asks for a flowchart, process map, SOP, workflow, or 流程图, use directional arrow edges and "dagre" layout.
 - Use arrows only when the relationship is directional: sequence, dependency, cause/effect, data flow, ownership handoff.
 - If the user's idea is about categories, themes, alternatives, evidence, interview findings, or pros/cons, prefer groups and spatial clustering, with few or no arrows.
 - If the user's idea is about a central concept and branches, use "mindmap".
@@ -262,6 +264,260 @@ const GLOBAL_REQUEST_PATTERNS = [
 
 function isGlobalRequest(userMessage: string): boolean {
   return GLOBAL_REQUEST_PATTERNS.some((p) => p.test(userMessage));
+}
+
+type LayoutIntentKind =
+  | 'flowchart'
+  | 'mindmap'
+  | 'matrix'
+  | 'cluster'
+  | 'timeline'
+  | 'swimlane'
+  | 'vertical'
+  | 'horizontal';
+
+export interface LayoutIntent {
+  kind: LayoutIntentKind;
+  algorithm: LayoutAlgorithm;
+  scope: 'changed' | 'all';
+  confidence: 'strong' | 'medium';
+  reason: string;
+  guidance: string[];
+}
+
+const EXECUTE_FLOW_PATTERNS = [
+  /执行流程/,
+  /执行这(?:个|条)?流程/,
+  /运行流程/,
+  /跑(?:一下)?流程/,
+  /\brun\s+(?:the\s+)?flow\b/i,
+  /\bexecute\s+(?:the\s+)?flow\b/i,
+];
+
+const ALL_LAYOUT_PATTERNS = [
+  /全局/,
+  /整个/,
+  /全部/,
+  /整理/,
+  /重排/,
+  /重新布局/,
+  /清理/,
+  /转成/,
+  /改成/,
+  /变成/,
+  /画(?:一个|一张)?/,
+  /生成(?:一个|一张)?/,
+  /创建(?:一个|一张)?/,
+  /做(?:一个|一张)?/,
+  /搭(?:一个|一张)?/,
+  /\brelayout\b/i,
+  /\bclean\s*up\b/i,
+  /\breorgani[sz]e\b/i,
+  /\bwhole\s*board\b/i,
+  /\ball\s*nodes\b/i,
+];
+
+function shouldUseAllScope(userMessage: string) {
+  return ALL_LAYOUT_PATTERNS.some((pattern) => pattern.test(userMessage));
+}
+
+function makeLayoutIntent(
+  userMessage: string,
+  kind: LayoutIntentKind,
+  algorithm: LayoutAlgorithm,
+  reason: string,
+  guidance: string[],
+  confidence: LayoutIntent['confidence'] = 'strong',
+): LayoutIntent {
+  return {
+    kind,
+    algorithm,
+    scope: shouldUseAllScope(userMessage) ? 'all' : 'changed',
+    confidence,
+    reason,
+    guidance,
+  };
+}
+
+export function inferLayoutIntent(userMessage: string): LayoutIntent | null {
+  const text = userMessage.trim();
+  if (!text) return null;
+  if (EXECUTE_FLOW_PATTERNS.some((pattern) => pattern.test(text))) return null;
+
+  if (/流程图|流程地图|业务流程|用户流程|操作流程|审批流程|\bflow\s*chart\b|\bflowchart\b|\bworkflow\b|\bprocess\s*map\b|\bSOP\b/i.test(text)) {
+    return makeLayoutIntent(text, 'flowchart', 'dagre', '用户要求流程/工作流结构', [
+      'Use card nodes as steps or decisions.',
+      'Use arrow edges for step order, dependency, handoff, or data movement.',
+      'Prefer a left-to-right or top-to-bottom flow shape; avoid mindmap, matrix, or cluster unless the user explicitly asks for them.',
+    ]);
+  }
+
+  if (/思维导图|脑图|中心主题|中心概念|分支|发散|mind\s*map/i.test(text)) {
+    return makeLayoutIntent(text, 'mindmap', 'mindmap', '用户要求中心主题和分支结构', [
+      'Put the central concept in the hub position.',
+      'Place branches around it and use line or arrow edges only when relationships are explicit.',
+    ]);
+  }
+
+  if (/矩阵|四象限|2x2|优先级矩阵|影响.?成本|影响.?努力|impact.?effort|trade[-\s]?off|取舍/i.test(text)) {
+    return makeLayoutIntent(text, 'matrix', 'matrix', '用户要求二维比较或取舍结构', [
+      'Use the matrix layout and make comparison dimensions clear in node titles, groups, or labels.',
+      'Avoid directional arrows unless there is a real dependency.',
+    ]);
+  }
+
+  if (/泳道|泳道图|角色|团队|部门|多.?agent|多个.?agent|并行轨道|parallel\s+track|swimlane/i.test(text)) {
+    return makeLayoutIntent(text, 'swimlane', 'swimlane', '用户要求按角色、团队或并行轨道组织', [
+      'Use groups as lanes when roles, teams, agents, or stages are identifiable.',
+      'Place items within each lane in a readable sequence.',
+    ]);
+  }
+
+  if (/时间线|路线图|roadmap|里程碑|阶段|旅程|用户旅程|timeline|milestone|journey/i.test(text)) {
+    return makeLayoutIntent(text, 'timeline', 'timeline', '用户要求按时间、阶段或旅程组织', [
+      'Order nodes by time, phase, or journey progression.',
+      'Use arrows only for directional progression or dependency.',
+    ]);
+  }
+
+  if (/分类|归类|聚类|主题|类别|模块|备选方案|方案对比|优缺点|洞察|访谈|affinity|cluster|theme|category|insight/i.test(text)) {
+    return makeLayoutIntent(text, 'cluster', 'cluster', '用户要求按主题、类别或洞察聚合', [
+      'Use groups for themes, categories, modules, options, or insight clusters.',
+      'Prefer spatial grouping with few arrows unless relationships are directional.',
+    ], 'medium');
+  }
+
+  if (/清单|列表|待办|backlog|优先级|决策链|decision\s+ladder|priority\s+stack/i.test(text)) {
+    return makeLayoutIntent(text, 'vertical', 'vertical', '用户要求列表、待办或优先级栈', [
+      'Use a vertical stack ordered by priority, sequence, or decision level.',
+    ], 'medium');
+  }
+
+  if (/横向比较|对比|比较|sequence|left[-\s]?to[-\s]?right|横向/i.test(text)) {
+    return makeLayoutIntent(text, 'horizontal', 'horizontal', '用户要求横向顺序或比较', [
+      'Use a left-to-right arrangement for sequence or comparison.',
+    ], 'medium');
+  }
+
+  return null;
+}
+
+function buildLayoutIntentPreflight(userMessage: string): string {
+  const intent = inferLayoutIntent(userMessage);
+  if (!intent) return '';
+
+  return `\nLayout intent preflight:\n\`\`\`json\n${JSON.stringify(intent, null, 2)}\n\`\`\`\n`;
+}
+
+export function normalizePatchForLayoutIntent(patch: DSLPatch, userMessage: string): DSLPatch {
+  const intent = inferLayoutIntent(userMessage);
+  if (!intent) return patch;
+  if (intent.confidence !== 'strong' && intent.scope !== 'all') return patch;
+
+  let sawLayout = false;
+  const ops = patch.ops.map((op) => {
+    if (op.op !== 'layout') return op;
+    sawLayout = true;
+    return {
+      ...op,
+      algorithm: intent.algorithm,
+      scope: intent.scope,
+    };
+  });
+
+  if (!sawLayout) {
+    ops.push({ op: 'layout', algorithm: intent.algorithm, scope: intent.scope });
+  }
+
+  return {
+    ...patch,
+    summary: patch.summary,
+    ops,
+  };
+}
+
+function inferDeepDiveTargetId(userMessage: string): string | null {
+  if (!/单个节点做深度研究和扩展|我的深挖需求|目标节点 ID/.test(userMessage)) return null;
+  const match = userMessage.match(/目标节点 ID:\s*([A-Za-z0-9_-]+)/);
+  return match?.[1] ?? null;
+}
+
+function makeUniqueEdgeId(base: string, usedIds: Set<string>) {
+  if (!usedIds.has(base)) return base;
+  let index = 2;
+  while (usedIds.has(`${base}_${index}`)) index += 1;
+  return `${base}_${index}`;
+}
+
+function normalizePatchForDeepDiveLinks(patch: DSLPatch, userMessage: string, board?: BoardDSL): DSLPatch {
+  const targetNodeId = inferDeepDiveTargetId(userMessage);
+  if (!targetNodeId) return patch;
+
+  const addedNodeIds = patch.ops
+    .filter((op) => op.op === 'add_node')
+    .map((op) => op.node.id)
+    .filter((nodeId) => nodeId !== targetNodeId);
+  if (addedNodeIds.length === 0) return patch;
+
+  const addedNodeIdSet = new Set(addedNodeIds);
+  const usedEdgeIds = new Set([
+    ...(board?.edges.map((edge) => edge.id) ?? []),
+    ...patch.ops.filter((op) => op.op === 'add_edge').map((op) => op.edge.id),
+  ]);
+  const connectedAddedNodeIds = new Set<string>();
+
+  const ops = patch.ops.map((op) => {
+    if (op.op !== 'add_edge') return op;
+    const touchesTarget = op.edge.from === targetNodeId || op.edge.to === targetNodeId;
+    const linkedAddedNodeId =
+      op.edge.from === targetNodeId && addedNodeIdSet.has(op.edge.to)
+        ? op.edge.to
+        : op.edge.to === targetNodeId && addedNodeIdSet.has(op.edge.from)
+          ? op.edge.from
+          : null;
+
+    if (!touchesTarget || !linkedAddedNodeId) return op;
+    connectedAddedNodeIds.add(linkedAddedNodeId);
+    return {
+      ...op,
+      edge: {
+        ...op.edge,
+        type: 'line' as const,
+      },
+    };
+  });
+
+  const existingBoardConnections = new Set(
+    (board?.edges ?? [])
+      .filter((edge) => edge.from === targetNodeId || edge.to === targetNodeId)
+      .flatMap((edge) => [edge.from, edge.to])
+      .filter((nodeId) => addedNodeIdSet.has(nodeId)),
+  );
+
+  for (const nodeId of addedNodeIds) {
+    if (connectedAddedNodeIds.has(nodeId) || existingBoardConnections.has(nodeId)) continue;
+    const edgeId = makeUniqueEdgeId(`edge_${targetNodeId}_${nodeId}`, usedEdgeIds);
+    usedEdgeIds.add(edgeId);
+    ops.push({
+      op: 'add_edge',
+      edge: {
+        id: edgeId,
+        from: targetNodeId,
+        to: nodeId,
+        type: 'line',
+      },
+    });
+  }
+
+  return {
+    ...patch,
+    ops,
+  };
+}
+
+export function normalizePatchForUserIntent(patch: DSLPatch, userMessage: string, board?: BoardDSL): DSLPatch {
+  const layoutNormalized = normalizePatchForLayoutIntent(patch, userMessage);
+  return normalizePatchForDeepDiveLinks(layoutNormalized, userMessage, board);
 }
 
 type SummaryNode = Pick<BoardNode, 'id' | 'type' | 'title' | 'tags'>;
@@ -398,6 +654,7 @@ export function buildUserMessage(board: BoardDSL, userMessage: string, options: 
   const runContext = options.runContext?.length
     ? `\nRun context events:\n\`\`\`json\n${JSON.stringify(options.runContext, null, 2)}\n\`\`\`\n`
     : '';
+  const layoutPreflight = buildLayoutIntentPreflight(userMessage);
 
   // Delta-first path: recent edits exist and the request does NOT look global
   const useDelta = options.recentEditEvents?.length && !isGlobalRequest(userMessage);
@@ -410,6 +667,7 @@ ${JSON.stringify(packet, null, 2)}
 \`\`\`
 
 Run id: ${options.runId ?? 'run_unspecified'}${runContext}
+${layoutPreflight}
 User request: ${userMessage}
 
 Return exactly one JSON object: either a DSLPatch if the board can be updated now, or an interaction_request if you need user choice, authorization, or clarification before continuing.`;
@@ -427,6 +685,7 @@ ${JSON.stringify(truncated, null, 2)}
 \`\`\`
 
 Run id: ${options.runId ?? 'run_unspecified'}${runContext}${recentEdits}
+${layoutPreflight}
 User request: ${userMessage}
 
 Return exactly one JSON object: either a DSLPatch if the board can be updated now, or an interaction_request if you need user choice, authorization, or clarification before continuing.`;

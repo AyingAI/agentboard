@@ -204,6 +204,33 @@ describe('applyPatch — success cases', () => {
     expect(new Set(xValues).size).toBeGreaterThanOrEqual(1);
   });
 
+  it('layout: dagre should respect directed edge layers', () => {
+    const board = minimalBoard({
+      nodes: [
+        newNode('n1'),
+        newNode('n2'),
+        newNode('n3'),
+      ],
+      edges: [
+        { id: 'e1', from: 'n1', to: 'n2', type: 'arrow' },
+        { id: 'e2', from: 'n2', to: 'n3', type: 'arrow' },
+      ],
+    });
+
+    const { board: resultBoard, result } = applyPatch(board, {
+      type: 'dsl_patch',
+      summary: 'flow layout',
+      ops: [{ op: 'layout', algorithm: 'dagre', scope: 'all' }],
+    });
+    const n1 = resultBoard.nodes.find((node) => node.id === 'n1')!;
+    const n2 = resultBoard.nodes.find((node) => node.id === 'n2')!;
+    const n3 = resultBoard.nodes.find((node) => node.id === 'n3')!;
+
+    expect(result.applied).toBe(true);
+    expect(n1.x).toBeLessThan(n2.x);
+    expect(n2.x).toBeLessThan(n3.x);
+  });
+
   it('layout: should support non-flow structure layouts', () => {
     const board = minimalBoard({
       nodes: [

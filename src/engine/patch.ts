@@ -102,6 +102,77 @@ function layoutGrid(nodes: BoardNode[], columns = 3) {
   });
 }
 
+function layoutDagre(nodes: BoardNode[], edges: BoardEdge[]) {
+  const nodeIds = new Set(nodes.map((node) => node.id));
+  const relevantEdges = edges.filter((edge) => nodeIds.has(edge.from) && nodeIds.has(edge.to));
+  if (relevantEdges.length === 0) return layoutGrid(nodes, 3);
+
+  const nodeOrder = new Map(nodes.map((node, index) => [node.id, index]));
+  const outgoing = new Map(nodes.map((node) => [node.id, [] as string[]]));
+  const indegree = new Map(nodes.map((node) => [node.id, 0]));
+  const rank = new Map(nodes.map((node) => [node.id, 0]));
+
+  for (const edge of relevantEdges) {
+    outgoing.get(edge.from)?.push(edge.to);
+    indegree.set(edge.to, (indegree.get(edge.to) ?? 0) + 1);
+  }
+
+  const queue = nodes
+    .filter((node) => (indegree.get(node.id) ?? 0) === 0)
+    .map((node) => node.id);
+  const visited = new Set<string>();
+
+  while (queue.length > 0) {
+    queue.sort((a, b) => (nodeOrder.get(a) ?? 0) - (nodeOrder.get(b) ?? 0));
+    const id = queue.shift()!;
+    if (visited.has(id)) continue;
+    visited.add(id);
+
+    for (const nextId of outgoing.get(id) ?? []) {
+      rank.set(nextId, Math.max(rank.get(nextId) ?? 0, (rank.get(id) ?? 0) + 1));
+      indegree.set(nextId, (indegree.get(nextId) ?? 0) - 1);
+      if ((indegree.get(nextId) ?? 0) === 0) queue.push(nextId);
+    }
+  }
+
+  const maxRank = Math.max(0, ...rank.values());
+  nodes.forEach((node) => {
+    if (!visited.has(node.id)) {
+      rank.set(node.id, maxRank + 1);
+    }
+  });
+
+  const layers = new Map<number, BoardNode[]>();
+  nodes.forEach((node) => {
+    const layer = rank.get(node.id) ?? 0;
+    layers.set(layer, [...(layers.get(layer) ?? []), node]);
+  });
+
+  const sortedLayers = [...layers.keys()].sort((a, b) => a - b);
+  const layerWidths = sortedLayers.map((layer) =>
+    Math.max(240, ...(layers.get(layer) ?? []).map((node) => node.width)),
+  );
+  const layerX = new Map<number, number>();
+  sortedLayers.forEach((layer, index) => {
+    const previousWidth = layerWidths.slice(0, index).reduce((sum, width) => sum + width + GAP_X, 0);
+    layerX.set(layer, START_X + previousWidth);
+  });
+
+  const positioned = new Map<string, BoardNode>();
+  sortedLayers.forEach((layer) => {
+    let cursorY = START_Y;
+    const layerNodes = [...(layers.get(layer) ?? [])].sort(
+      (a, b) => (nodeOrder.get(a.id) ?? 0) - (nodeOrder.get(b.id) ?? 0),
+    );
+    layerNodes.forEach((node) => {
+      positioned.set(node.id, positionNode(node, layerX.get(layer) ?? START_X, cursorY));
+      cursorY += nodeStepY(node);
+    });
+  });
+
+  return nodes.map((node) => positioned.get(node.id) ?? node);
+}
+
 function layoutTimeline(nodes: BoardNode[]) {
   return layoutHorizontal(nodes).map((node, index) => ({
     ...node,
@@ -195,7 +266,7 @@ function layoutNodes(
 
   const laidOut = (() => {
     if (algorithm === 'vertical') return layoutVertical(nodes);
-    if (algorithm === 'dagre') return layoutGrid(nodes, 3);
+    if (algorithm === 'dagre') return layoutDagre(nodes, edges);
     if (algorithm === 'matrix') return layoutGrid(nodes, 2);
     if (algorithm === 'timeline') return layoutTimeline(nodes);
     if (algorithm === 'mindmap') return layoutMindmap(nodes, edges);

@@ -3,6 +3,7 @@ import type { BoardDSL, BoardEditEvent, BoardNode } from './types/dsl';
 import { useBoardSessions } from './hooks/useBoardSessions';
 import { useAgent } from './hooks/useAgent';
 import { useAgentConfig } from './hooks/useAgentConfig';
+import { buildNodeDeepDivePrompt } from './agent/deepDive';
 import { useDrag } from './hooks/useDrag';
 import { useCanvasPan } from './hooks/useCanvasPan';
 import { useEdgeCreation } from './hooks/useEdgeCreation';
@@ -29,26 +30,6 @@ function makeActivityId() {
 
 function makeNodeId(): string {
   return `node_${Date.now()}_${Math.random().toString(16).slice(4)}`;
-}
-
-function buildNodeDeepDivePrompt(node: BoardNode, request: string): string {
-  return [
-    '请基于当前选中的单个节点做深度研究和扩展，不要把整张白板重新生成或重排。',
-    '',
-    `目标节点 ID: ${node.id}`,
-    `目标节点标题: ${node.title}`,
-    `目标节点正文: ${node.body || '(空)'}`,
-    `目标节点标签: ${node.tags?.join(', ') || '(无)'}`,
-    '',
-    `我的深挖需求: ${request}`,
-    '',
-    '输出要求:',
-    '- 优先围绕这个目标节点新增 1-3 个高价值关联节点，必要时补充连线。',
-    '- 新增节点放在目标节点右侧或下方附近，保持原有白板布局稳定。',
-    '- 如果只是补充或修正目标节点内容，使用 update_node，不要重复创建同义节点。',
-    '- 除非我明确要求整理全图，否则不要使用 layout scope "all"。',
-    '- 如果信息不足，先提出关键问题、假设或待验证点，不要硬编。',
-  ].join('\n');
 }
 
 function SettingsIcon() {

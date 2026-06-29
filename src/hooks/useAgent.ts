@@ -20,6 +20,7 @@ import type {
 import { ClaudeAgentAdapter } from '../agent/claudeAgent';
 import { LocalCliAdapter } from '../agent/localCliAgent';
 import { OpenAIAgentAdapter } from '../agent/openaiAgent';
+import { normalizePatchForUserIntent } from '../agent/prompts';
 import { isAborted, withRetry } from '../agent/resilience';
 import { applyPatch } from '../engine/patch';
 
@@ -327,13 +328,14 @@ export function useAgent(
           return;
         }
 
-        const patch = response;
+        const currentBoard = getBoard();
+        const patch = normalizePatchForUserIntent(response, userMessage, currentBoard);
         updateRunProgress(progressActivity.id, {
           summary: `[${providerName}] 正在校验 patch`,
           detail: `已生成 ${patch.ops.length} 个白板修改，正在做结构校验和引用检查。`,
           activeStepId: 'validate',
         });
-        const { board: resultBoard, result } = applyPatch(getBoard(), patch);
+        const { board: resultBoard, result } = applyPatch(currentBoard, patch);
         setLastPatch(patch);
 
         if (!result.applied) {
