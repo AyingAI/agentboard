@@ -223,7 +223,7 @@ export interface ActivityProgressStep {
 export interface ActivityEntry {
   id: string;
   timestamp: number;
-  kind: 'agent_patch' | 'validation_error' | 'system' | 'needs_input' | 'run_progress';
+  kind: 'user_message' | 'agent_patch' | 'validation_error' | 'system' | 'needs_input' | 'run_progress';
   summary: string;
   detail?: string;
   runId?: string;

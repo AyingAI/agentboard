@@ -12,6 +12,7 @@ import PromptBar from './components/PromptBar';
 import ActivityPanel from './components/ActivityPanel';
 import AgentConfigPanel from './components/AgentConfig';
 import AgentRunOverlay from './components/AgentRunOverlay';
+import InteractionToast from './components/InteractionToast';
 
 type EditState = {
   nodeId: string;
@@ -267,6 +268,11 @@ export default function App() {
     () => activities.find((item) => item.kind === 'run_progress' && item.progressStatus === 'running') ?? null,
     [activities],
   );
+  const pendingInteractions = useMemo(
+    () => activities.filter((item) => item.kind === 'needs_input' && item.interaction && !item.resolvedDecision),
+    [activities],
+  );
+  const pendingInteraction = pendingInteractions[0] ?? null;
 
   function undoLastBoardChange() {
     const previousBoard = undoStack[undoStack.length - 1];
@@ -563,7 +569,7 @@ export default function App() {
       return;
     }
 
-    submitMessage(buildNodeDeepDivePrompt(targetNode, trimmed));
+    submitMessage(buildNodeDeepDivePrompt(targetNode, trimmed), trimmed);
     setDeepDiveInput('');
     setDeepDiveNodeId(null);
   }
@@ -670,10 +676,11 @@ export default function App() {
           </button>
           <button
             type="button"
-            className={isActivityOpen ? 'active' : ''}
+            className={`${isActivityOpen ? 'active' : ''} ${pendingInteractions.length > 0 ? 'needs-attention' : ''}`}
             onClick={() => setActivityOpen((v) => !v)}
+            title={pendingInteractions.length > 0 ? `${pendingInteractions.length} 个 Agent 请求等待处理` : '查看 Agent Activity'}
           >
-            活动{activities.length > 0 ? ` (${activities.length})` : ''}
+            活动{pendingInteractions.length > 0 ? ` · 待确认 ${pendingInteractions.length}` : activities.length > 0 ? ` (${activities.length})` : ''}
           </button>
           <button
             type="button"
@@ -759,6 +766,19 @@ export default function App() {
               onOpenActivity={() => {
                 setActivityOpen(true);
                 setExpandedActivityId(runningActivity.id);
+              }}
+            />
+          ) : null}
+
+          {pendingInteraction ? (
+            <InteractionToast
+              activity={pendingInteraction}
+              onRespond={(runId, decision, activityId) => {
+                resumeRun(runId, decision, activityId);
+              }}
+              onOpenActivity={() => {
+                setActivityOpen(true);
+                setExpandedActivityId(pendingInteraction.id);
               }}
             />
           ) : null}

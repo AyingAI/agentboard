@@ -3,6 +3,7 @@ import type { ActivityEntry, ActivityProgressStep } from '../types/dsl';
 import type { InteractionDecision } from '../hooks/useAgent';
 
 const KIND_LABEL: Record<ActivityEntry['kind'], string> = {
+  user_message: '↗',
   system: '⚙',
   agent_patch: '🤖',
   validation_error: '⚠',
@@ -39,8 +40,15 @@ export default function ActivityPanel({
   onToggleExpand,
   onRespondToInteraction,
 }: ActivityPanelProps) {
+  const [filter, setFilter] = useState<'all' | 'user_message'>('all');
   const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [copyFailedId, setCopyFailedId] = useState<string | null>(null);
   const [now, setNow] = useState(Date.now());
+  const visibleActivities = filter === 'user_message'
+    ? activities.filter((item) => item.kind === 'user_message')
+    : activities;
+  const userMessageCount = activities.filter((item) => item.kind === 'user_message').length;
 
   useEffect(() => {
     const hasRunning = activities.some((item) =>
@@ -57,6 +65,20 @@ export default function ActivityPanel({
     setDrafts((value) => ({ ...value, [item.id]: '' }));
   }
 
+  async function copyInstruction(item: ActivityEntry) {
+    const text = item.detail?.trim();
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedId(item.id);
+      setCopyFailedId(null);
+      window.setTimeout(() => setCopiedId((current) => (current === item.id ? null : current)), 1600);
+    } catch {
+      setCopyFailedId(item.id);
+      window.setTimeout(() => setCopyFailedId((current) => (current === item.id ? null : current)), 2200);
+    }
+  }
+
   return (
     <aside className="activity-panel">
       <div className="activity-header">
@@ -65,8 +87,29 @@ export default function ActivityPanel({
           ✕
         </button>
       </div>
+      <div className="activity-filter" role="tablist" aria-label="Activity 筛选">
+        <button
+          type="button"
+          className={filter === 'all' ? 'active' : ''}
+          onClick={() => setFilter('all')}
+        >
+          全部
+        </button>
+        <button
+          type="button"
+          className={filter === 'user_message' ? 'active' : ''}
+          onClick={() => setFilter('user_message')}
+        >
+          用户指令{userMessageCount > 0 ? ` ${userMessageCount}` : ''}
+        </button>
+      </div>
       <div className="activity-list">
-        {activities.map((item) => {
+        {visibleActivities.length === 0 ? (
+          <div className="activity-empty">
+            {filter === 'user_message' ? '还没有用户指令记录。' : '暂无 Activity。'}
+          </div>
+        ) : null}
+        {visibleActivities.map((item) => {
           const isExpanded = expandedId === item.id;
           const elapsed = item.startedAt
             ? formatElapsed((item.completedAt ?? now) - item.startedAt)
@@ -108,6 +151,16 @@ export default function ActivityPanel({
                   {isExpanded && item.detail ? (
                     <pre className="progress-detail">{item.detail}</pre>
                   ) : null}
+                </div>
+              ) : isExpanded && item.kind === 'user_message' && item.detail ? (
+                <div className="user-message-card">
+                  <div className="user-message-card-header">
+                    <span>原始指令</span>
+                    <button type="button" onClick={() => copyInstruction(item)}>
+                      {copiedId === item.id ? '已复制' : copyFailedId === item.id ? '复制失败' : '复制'}
+                    </button>
+                  </div>
+                  <pre>{item.detail}</pre>
                 </div>
               ) : isExpanded && item.kind === 'needs_input' && item.interaction ? (
                 <div className="interaction-card">

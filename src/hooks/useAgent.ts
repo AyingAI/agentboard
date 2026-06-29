@@ -437,7 +437,7 @@ export function useAgent(
   }, []);
 
   const submitMessage = useCallback(
-    async (message: string) => {
+    async (message: string, displayMessage = message) => {
       const runId = makeRunId();
       const userEvent: AgentRunEvent = {
         type: 'user_message',
@@ -450,6 +450,15 @@ export function useAgent(
         events: [userEvent],
       };
       setRuns((prev) => ({ ...prev, [runId]: run }));
+      setActivities((items) => [
+        makeActivity(
+          'user_message',
+          `用户指令：${displayMessage.length > 42 ? `${displayMessage.slice(0, 42)}...` : displayMessage}`,
+          displayMessage,
+          { runId },
+        ),
+        ...items,
+      ]);
       await executeRun(run, message);
     },
     [executeRun],
