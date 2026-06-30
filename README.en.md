@@ -15,7 +15,7 @@ AgentBoard turns a conversation with an agent into an editable canvas. The user 
 - Stores the board as a structured `BoardDSL`, not as a flat image.
 - Applies agent output through validated `DSLPatch` operations.
 - Lets agents read recent human edits through a delta-first context packet instead of always receiving the full board.
-- Supports local CLI agents such as Claude Code and OpenCode through a Vite dev-server bridge.
+- Supports local CLI agents such as Claude Code, OpenCode, Pi CLI, Codex CLI, Gemini CLI, Antigravity, Qwen Code, Cursor Agent, GitHub Copilot CLI, Qoder, Kimi, and Trae through a Vite dev-server bridge.
 - Supports Claude API and OpenAI-compatible APIs.
 - Persists sessions and agent settings locally in `localStorage`.
 
@@ -46,7 +46,7 @@ Open `http://localhost:5173`.
 
 Then choose an agent provider from the settings panel:
 
-- **Local CLI**: auto-detects supported local CLIs such as Claude Code or OpenCode.
+- **Local CLI**: auto-detects supported local CLIs such as Claude Code, OpenCode, Pi CLI, Codex CLI, Gemini CLI, Antigravity, Qwen Code, Cursor Agent, GitHub Copilot CLI, Qoder, Kimi, and Trae.
 - **Claude API**: use an Anthropic API key.
 - **OpenAI-compatible API**: use OpenAI or a compatible base URL.
 

@@ -307,7 +307,7 @@ export default function AgentConfigPanel({
         <section className={`provider-recommendation ${config.provider === 'local-cli' ? 'selected' : ''}`}>
           <strong>{config.provider === 'local-cli' ? '当前为推荐模式' : '推荐优先使用本地 CLI'}</strong>
           <p>
-            本地 CLI 可以复用已安装的 Claude Code 或 OpenCode，适合需要搜索、读写文件、执行命令和使用 skill 的任务。API 模式更适合轻量整理和结构化输出。
+            本地 CLI 可以复用已安装的 Agent 工具，适合需要搜索、读写文件、执行命令和使用 skill 的任务。API 模式更适合轻量整理和结构化输出。
           </p>
         </section>
 
@@ -329,7 +329,7 @@ export default function AgentConfigPanel({
             </select>
             {!loadingClis && availableClis.length === 0 && (
               <span className="config-hint">
-                未检测到本地 CLI。请确认已安装 Claude Code（<code>claude</code>）或 OpenCode（<code>opencode</code>）。
+                未检测到受支持的本地 CLI。当前支持 Claude Code、OpenCode、Pi CLI、Codex CLI、Gemini CLI、Antigravity、Qwen Code、Cursor Agent、GitHub Copilot CLI、Qoder、Kimi 和 Trae。
               </span>
             )}
           </label>

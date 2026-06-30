@@ -11,9 +11,122 @@ interface CliInfo {
   version?: string;
 }
 
-const KNOWN_CLIS: { id: string; name: string; check: string }[] = [
-  { id: 'claude', name: 'Claude Code', check: 'which claude' },
-  { id: 'opencode', name: 'OpenCode', check: 'which opencode' },
+type CliPromptMode = 'stdin' | 'argument';
+
+type CliSpec = {
+  id: string;
+  name: string;
+  commands: string[];
+  versionArgs: string[];
+  args: string[];
+  promptMode: CliPromptMode;
+};
+
+const KNOWN_CLIS: CliSpec[] = [
+  {
+    id: 'claude',
+    name: 'Claude Code',
+    commands: ['claude'],
+    versionArgs: ['--version'],
+    args: [
+      '--permission-mode',
+      'auto',
+      '-p',
+      '--output-format',
+      'stream-json',
+      '--include-partial-messages',
+      '--verbose',
+    ],
+    promptMode: 'stdin',
+  },
+  {
+    id: 'opencode',
+    name: 'OpenCode',
+    commands: ['opencode'],
+    versionArgs: ['--version'],
+    args: ['run'],
+    promptMode: 'stdin',
+  },
+  {
+    id: 'pi',
+    name: 'Pi CLI',
+    commands: ['pi'],
+    versionArgs: ['--version'],
+    args: ['--print', '--mode', 'text'],
+    promptMode: 'stdin',
+  },
+  {
+    id: 'codex',
+    name: 'Codex CLI',
+    commands: ['codex'],
+    versionArgs: ['--version'],
+    args: ['exec', '--ask-for-approval', 'never', '--sandbox', 'workspace-write', '--color', 'never', '-'],
+    promptMode: 'stdin',
+  },
+  {
+    id: 'gemini',
+    name: 'Gemini CLI',
+    commands: ['gemini'],
+    versionArgs: ['--version'],
+    args: ['--prompt', '', '--output-format', 'text'],
+    promptMode: 'stdin',
+  },
+  {
+    id: 'antigravity',
+    name: 'Antigravity CLI',
+    commands: ['agy'],
+    versionArgs: ['--version'],
+    args: ['-p'],
+    promptMode: 'argument',
+  },
+  {
+    id: 'qwen',
+    name: 'Qwen Code',
+    commands: ['qwen', 'qwen-code'],
+    versionArgs: ['--version'],
+    args: ['--prompt', '', '--output-format', 'text'],
+    promptMode: 'stdin',
+  },
+  {
+    id: 'cursor-agent',
+    name: 'Cursor Agent',
+    commands: ['cursor-agent'],
+    versionArgs: ['--version'],
+    args: ['-p'],
+    promptMode: 'argument',
+  },
+  {
+    id: 'copilot',
+    name: 'GitHub Copilot CLI',
+    commands: ['copilot'],
+    versionArgs: ['--version'],
+    args: ['-s', '-p'],
+    promptMode: 'argument',
+  },
+  {
+    id: 'qoder',
+    name: 'Qoder CLI',
+    commands: ['qodercli', 'qoderclicn'],
+    versionArgs: ['--version'],
+    args: ['-q', '--output-format', 'text', '-p'],
+    promptMode: 'argument',
+  },
+  {
+    id: 'kimi',
+    name: 'Kimi Code CLI',
+    commands: ['kimi', 'kimi-cli'],
+    versionArgs: ['--version'],
+    args: ['--output-format', 'text', '-p'],
+    promptMode: 'argument',
+  },
+  {
+    id: 'trae',
+    name: 'Trae CLI',
+    commands: ['trae-cli'],
+    versionArgs: ['--version'],
+    args: ['run'],
+    promptMode: 'argument',
+  },
 ];
 
 const CLI_TIMEOUT_MS = 240_000;
@@ -34,18 +147,35 @@ const activeRuns = new Map<string, StoredRun>();
 function detectCLIs(): CliInfo[] {
   return KNOWN_CLIS.map((cli) => {
     try {
-      const path = execSync(cli.check, { stdio: 'pipe', encoding: 'utf-8' }).trim();
+      const detected = resolveCliCommand(cli);
+      if (!detected) throw new Error('CLI not found');
       let version = '';
       try {
-        version = execSync(`${cli.id} --version`, { stdio: 'pipe', encoding: 'utf-8' }).trim();
+        version = execSync([detected.command, ...cli.versionArgs].join(' '), { stdio: 'pipe', encoding: 'utf-8' }).trim();
       } catch {
         // version check is best-effort
       }
-      return { id: cli.id, name: cli.name, available: true, version: version || path };
+      return { id: cli.id, name: cli.name, available: true, version: version || detected.path };
     } catch {
       return { id: cli.id, name: cli.name, available: false };
     }
   });
+}
+
+function getCliSpec(cliId: string) {
+  return KNOWN_CLIS.find((cli) => cli.id === cliId);
+}
+
+function resolveCliCommand(cli: CliSpec) {
+  for (const command of cli.commands) {
+    try {
+      const path = execSync(`which ${command}`, { stdio: 'pipe', encoding: 'utf-8' }).trim();
+      if (path) return { command, path };
+    } catch {
+      // Try the next alias.
+    }
+  }
+  return null;
 }
 
 type BridgeProgressEvent = {
@@ -199,18 +329,12 @@ function runCLIStream(
   run: StoredRun,
 ): Promise<string> {
   const fullPrompt = `${systemPrompt}\n\n---\n\n${userMessage}`;
-  const isClaude = cliId === 'claude';
-  const args = isClaude
-    ? [
-        '--permission-mode',
-        'auto',
-        '-p',
-        '--output-format',
-        'stream-json',
-        '--include-partial-messages',
-        '--verbose',
-      ]
-    : ['run'];
+  const spec = getCliSpec(cliId);
+  if (!spec) return Promise.reject(new Error(`Unsupported CLI "${cliId}"`));
+  const detected = resolveCliCommand(spec);
+  if (!detected) return Promise.reject(new Error(`CLI "${spec.name}" is not available`));
+  const isClaude = spec.id === 'claude';
+  const args = spec.promptMode === 'argument' ? [...spec.args, fullPrompt] : spec.args;
 
   return new Promise((resolve, reject) => {
     const startedAt = Date.now();
@@ -224,7 +348,7 @@ function runCLIStream(
     let stdoutBuffer = '';
     let stderr = '';
     let settled = false;
-    const child = spawn(cliId, args, {
+    const child = spawn(detected.command, args, {
       stdio: ['pipe', 'pipe', 'pipe'],
       env: process.env,
     });
@@ -241,7 +365,7 @@ function runCLIStream(
 
     writeStreamEvent(res, {
       type: 'progress',
-      event: { type: 'connected', message: `已连接 ${cliId}，正在启动执行` },
+      event: { type: 'connected', message: `已连接 ${spec.name}，正在启动执行` },
     });
 
     const heartbeat = setInterval(() => {
@@ -345,7 +469,11 @@ function runCLIStream(
     });
 
     child.stdin.on('error', (error) => finish(() => reject(error)));
-    child.stdin.end(fullPrompt);
+    if (spec.promptMode === 'stdin') {
+      child.stdin.end(fullPrompt);
+    } else {
+      child.stdin.end();
+    }
   });
 }
 

@@ -15,7 +15,7 @@ AgentBoard 把和 Agent 的对话变成一张可编辑画布。用户可以让 A
 - 白板以结构化 `BoardDSL` 存储，而不是一张扁平图片。
 - Agent 输出通过经过校验的 `DSLPatch` 操作应用到白板。
 - Agent 可以读取最近的人类编辑增量，不必每次都读取完整白板。
-- 通过 Vite 开发服务器桥接本地 CLI Agent，例如 Claude Code 和 OpenCode。
+- 通过 Vite 开发服务器桥接本地 CLI Agent，例如 Claude Code、OpenCode、Pi CLI、Codex CLI、Gemini CLI、Antigravity、Qwen Code、Cursor Agent、GitHub Copilot CLI、Qoder、Kimi 和 Trae。
 - 支持 Claude API 和 OpenAI 兼容 API。
 - 白板 session 和 Agent 设置保存在本机浏览器 `localStorage`。
 
@@ -46,11 +46,11 @@ npm run dev
 
 然后在设置面板选择 Agent 提供方：
 
-- **Local CLI**：自动检测 Claude Code、OpenCode 等本地 CLI。
+- **Local CLI**：自动检测受支持的本地 CLI，例如 Claude Code、OpenCode、Pi CLI、Codex CLI、Gemini CLI、Antigravity、Qwen Code、Cursor Agent、GitHub Copilot CLI、Qoder、Kimi 和 Trae。
 - **Claude API**：使用 Anthropic API key。
 - **OpenAI-compatible API**：使用 OpenAI 或兼容的 base URL。
 
-推荐优先使用 **Local CLI**。它会复用你本机已经配置好的 Claude Code 或 OpenCode，通常能获得更完整的 Agent 体验：可以使用本地 CLI 自带的搜索、文件读写、命令执行和 skill 能力，而不只是让模型生成一段文本。
+推荐优先使用 **Local CLI**。它会复用你本机已经配置好的 Agent 工具，通常能获得更完整的 Agent 体验：可以使用本地 CLI 自带的搜索、文件读写、命令执行和 skill 能力，而不只是让模型生成一段文本。
 
 Claude API 和 OpenAI-compatible API 适合轻量使用，例如快速整理白板、生成结构化节点或在没有本地 CLI 的环境下试用。当前 API 模式主要负责文本推理和结构化输出，不会自动拥有本地 CLI 的工具能力。
 

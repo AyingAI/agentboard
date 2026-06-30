@@ -131,7 +131,7 @@ class NoAgentAdapter implements AgentAdapter {
   async generateResponse(_request: AgentRequest): Promise<AgentResponse> {
     throw {
       code: 'API_ERROR' as const,
-      message: '未检测到可用的 Agent CLI。请确认已安装 Claude Code 或在设置中配置 API Key。',
+      message: '未检测到可用的 Agent CLI。请确认已安装受支持的本地 CLI，或在设置中配置 API。',
     };
   }
 }
