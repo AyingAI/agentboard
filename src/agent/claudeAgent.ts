@@ -3,8 +3,14 @@ import { buildSystemPrompt, buildUserMessage } from './prompts';
 import { fallbackInteractionFromText, parseAgentResponse } from './response';
 import { DEFAULT_TIMEOUT_MS, mapAbortError, withTimeout } from './resilience';
 
-const ANTHROPIC_API = 'https://api.anthropic.com/v1/messages';
+const DEFAULT_ANTHROPIC_BASE_URL = 'https://api.anthropic.com/v1';
 const ANTHROPIC_VERSION = '2023-06-01';
+
+function normalizeClaudeBaseUrl(rawUrl: string | undefined) {
+  const value = (rawUrl || DEFAULT_ANTHROPIC_BASE_URL).trim().replace(/\/+$/, '');
+  if (/\/v\d+$/i.test(value)) return value;
+  return `${value}/v1`;
+}
 
 /** Claude API adapter via browser fetch */
 export class ClaudeAgentAdapter implements AgentAdapter {
@@ -30,9 +36,10 @@ export class ClaudeAgentAdapter implements AgentAdapter {
     });
 
     let response: Response;
+    const apiUrl = `${normalizeClaudeBaseUrl(this.config.baseUrl)}/messages`;
     const { signal, cleanup } = withTimeout(request.signal, DEFAULT_TIMEOUT_MS);
     try {
-      response = await fetch(ANTHROPIC_API, {
+      response = await fetch(apiUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

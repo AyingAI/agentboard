@@ -50,6 +50,10 @@ npm run dev
 - **Claude API**：使用 Anthropic API key。
 - **OpenAI-compatible API**：使用 OpenAI 或兼容的 base URL。
 
+推荐优先使用 **Local CLI**。它会复用你本机已经配置好的 Claude Code 或 OpenCode，通常能获得更完整的 Agent 体验：可以使用本地 CLI 自带的搜索、文件读写、命令执行和 skill 能力，而不只是让模型生成一段文本。
+
+Claude API 和 OpenAI-compatible API 适合轻量使用，例如快速整理白板、生成结构化节点或在没有本地 CLI 的环境下试用。当前 API 模式主要负责文本推理和结构化输出，不会自动拥有本地 CLI 的工具能力。
+
 API key 只保存在浏览器 `localStorage`。不要把 secrets 提交到仓库。
 
 ## 画布基础操作

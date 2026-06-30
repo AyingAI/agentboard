@@ -1937,6 +1937,13 @@ button:disabled {
   font-size: 13px;
 }
 
+.config-field-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
 .config-field span {
   color: #596477;
   font-weight: 600;
@@ -1961,6 +1968,66 @@ button:disabled {
   color: #8893a8;
   font-size: 11px;
   font-weight: 400;
+}
+
+.config-hint.success {
+  color: #2f7145;
+}
+
+.config-hint.error {
+  color: #a64223;
+}
+
+.config-hint.running {
+  color: #3c4f80;
+}
+
+.config-inline-button {
+  border: 1px solid #c8ced8;
+  border-radius: 7px;
+  background: #f9fafb;
+  color: #465469;
+  font-size: 11px;
+  font-weight: 650;
+  min-height: 26px;
+  padding: 0 9px;
+  white-space: nowrap;
+}
+
+.config-inline-button:hover:not(:disabled) {
+  background: #eef2f8;
+  border-color: #aeb7c6;
+}
+
+.config-inline-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.provider-recommendation {
+  border: 1px solid #d8dee8;
+  border-radius: 8px;
+  background: #f7f9fc;
+  padding: 10px 12px;
+}
+
+.provider-recommendation.selected {
+  border-color: #b8c9a8;
+  background: #f3f8ef;
+}
+
+.provider-recommendation strong {
+  display: block;
+  color: #344054;
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+
+.provider-recommendation p {
+  margin: 0;
+  color: #687386;
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .config-note {

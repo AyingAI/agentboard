@@ -3,6 +3,12 @@ import { buildSystemPrompt, buildUserMessage } from './prompts';
 import { fallbackInteractionFromText, parseAgentResponse } from './response';
 import { DEFAULT_TIMEOUT_MS, mapAbortError, withTimeout } from './resilience';
 
+function normalizeOpenAIBaseUrl(rawUrl: string | undefined) {
+  const value = (rawUrl || 'https://api.openai.com/v1').trim().replace(/\/+$/, '');
+  if (/\/v\d+$/i.test(value)) return value;
+  return `${value}/v1`;
+}
+
 export class OpenAIAgentAdapter implements AgentAdapter {
   readonly name: string;
 
@@ -21,7 +27,7 @@ export class OpenAIAgentAdapter implements AgentAdapter {
       runContext: request.runContext,
       recentEditEvents: request.recentEditEvents,
     });
-    const baseUrl = this.config.baseUrl || 'https://api.openai.com/v1';
+    const baseUrl = normalizeOpenAIBaseUrl(this.config.baseUrl);
 
     let response: Response;
     const { signal, cleanup } = withTimeout(request.signal, DEFAULT_TIMEOUT_MS);

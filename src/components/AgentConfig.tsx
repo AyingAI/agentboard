@@ -6,6 +6,11 @@ import { fetchCLIs, LocalCliAdapter } from '../agent/localCliAgent';
 import { OpenAIAgentAdapter } from '../agent/openaiAgent';
 import { applyPatch } from '../engine/patch';
 
+type ModelOption = {
+  value: string;
+  label: string;
+};
+
 interface CliInfo {
   id: string;
   name: string;
@@ -36,11 +41,20 @@ const OPENAI_MODELS = [
   { value: 'o1', label: 'o1' },
 ];
 
+const DEFAULT_CLAUDE_BASE_URL = 'https://api.anthropic.com/v1';
+const DEFAULT_OPENAI_BASE_URL = 'https://api.openai.com/v1';
+
 type TestState =
   | { status: 'idle'; message: string; detail?: string }
   | { status: 'running'; message: string; detail?: string }
   | { status: 'success'; message: string; detail?: string }
   | { status: 'error'; message: string; detail?: string };
+
+type ModelFetchState =
+  | { status: 'idle'; message?: string }
+  | { status: 'running'; message: string }
+  | { status: 'success'; message: string }
+  | { status: 'error'; message: string };
 
 const SCHEMA_TEST_BOARD: BoardDSL = {
   version: '0.1',
@@ -75,6 +89,46 @@ function createAdapter(config: AgentConfig): AgentAdapter | null {
   return null;
 }
 
+function normalizeApiBaseUrl(rawUrl: string | undefined, defaultUrl: string) {
+  const value = (rawUrl || defaultUrl).trim().replace(/\/+$/, '');
+  if (/\/v\d+$/i.test(value)) return value;
+  return `${value}/v1`;
+}
+
+function modelSourceKey(provider: AgentProvider, baseUrl: string | undefined) {
+  if (provider === 'claude') return `${provider}:${normalizeApiBaseUrl(baseUrl, DEFAULT_CLAUDE_BASE_URL)}`;
+  if (provider === 'openai') return `${provider}:${normalizeApiBaseUrl(baseUrl, DEFAULT_OPENAI_BASE_URL)}`;
+  return provider;
+}
+
+function extractModelOptions(body: unknown): ModelOption[] {
+  const data = (body as { data?: unknown })?.data;
+  if (!Array.isArray(data)) return [];
+
+  const options = data
+    .map((item) => {
+      if (!item || typeof item !== 'object') return null;
+      const record = item as Record<string, unknown>;
+      const id = typeof record.id === 'string' ? record.id : '';
+      if (!id) return null;
+      const displayName = typeof record.display_name === 'string'
+        ? record.display_name
+        : typeof record.name === 'string'
+          ? record.name
+          : id;
+      return { value: id, label: displayName };
+    })
+    .filter((option): option is ModelOption => Boolean(option));
+
+  return Array.from(new Map(options.map((option) => [option.value, option])).values())
+    .sort((a, b) => a.label.localeCompare(b.label));
+}
+
+function modelOptionsWithCurrent(options: ModelOption[], currentModel: string | undefined) {
+  if (!currentModel || options.some((option) => option.value === currentModel)) return options;
+  return [{ value: currentModel, label: currentModel }, ...options];
+}
+
 export default function AgentConfigPanel({
   config,
   onSetApiKey,
@@ -90,6 +144,8 @@ export default function AgentConfigPanel({
     status: 'idle',
     message: '尚未测试当前 Agent 的结构化输出能力。',
   });
+  const [modelsBySource, setModelsBySource] = useState<Record<string, ModelOption[]>>({});
+  const [modelFetchState, setModelFetchState] = useState<ModelFetchState>({ status: 'idle' });
 
   useEffect(() => {
     fetchCLIs()
@@ -98,7 +154,18 @@ export default function AgentConfigPanel({
       .finally(() => setLoadingClis(false));
   }, []);
 
+  useEffect(() => {
+    setModelFetchState({ status: 'idle' });
+  }, [config.provider, config.baseUrl, config.apiKey]);
+
   const availableClis = clis.filter((c) => c.available);
+  const currentModelSourceKey = modelSourceKey(config.provider, config.baseUrl);
+  const fetchedModelOptions = modelsBySource[currentModelSourceKey] ?? [];
+  const defaultModelOptions = config.provider === 'claude' ? CLAUDE_MODELS : OPENAI_MODELS;
+  const apiModelOptions = modelOptionsWithCurrent(
+    fetchedModelOptions.length > 0 ? fetchedModelOptions : defaultModelOptions,
+    config.model,
+  );
 
   const canRunSchemaTest = Boolean(
     (config.provider === 'local-cli' && config.cliId) ||
@@ -164,6 +231,51 @@ export default function AgentConfigPanel({
     }
   }
 
+  async function fetchApiModels() {
+    if (config.provider !== 'claude' && config.provider !== 'openai') return;
+    if (!config.apiKey) {
+      setModelFetchState({ status: 'error', message: '请先填写 API Key。' });
+      return;
+    }
+
+    const baseUrl = config.provider === 'claude'
+      ? normalizeApiBaseUrl(config.baseUrl, DEFAULT_CLAUDE_BASE_URL)
+      : normalizeApiBaseUrl(config.baseUrl, DEFAULT_OPENAI_BASE_URL);
+    const endpoint = `${baseUrl}/models`;
+    const headers: Record<string, string> = config.provider === 'claude'
+      ? {
+          'x-api-key': config.apiKey,
+          'anthropic-version': '2023-06-01',
+        }
+      : {
+          'Authorization': `Bearer ${config.apiKey}`,
+        };
+
+    setModelFetchState({ status: 'running', message: '正在获取模型列表…' });
+    try {
+      const response = await fetch(endpoint, { headers });
+      if (!response.ok) {
+        setModelFetchState({ status: 'error', message: `获取失败：API 返回 ${response.status}。` });
+        return;
+      }
+
+      const body = await response.json();
+      const models = extractModelOptions(body);
+      if (models.length === 0) {
+        setModelFetchState({ status: 'error', message: '没有从 API 响应中找到可选模型。' });
+        return;
+      }
+
+      setModelsBySource((prev) => ({ ...prev, [currentModelSourceKey]: models }));
+      if (!config.model || !models.some((model) => model.value === config.model)) {
+        onSetModel(models[0].value);
+      }
+      setModelFetchState({ status: 'success', message: `已获取 ${models.length} 个模型。` });
+    } catch {
+      setModelFetchState({ status: 'error', message: '无法连接模型接口，请检查 API Key、Base URL 或网络。' });
+    }
+  }
+
   return (
     <div className="agent-config-overlay" onClick={onClose}>
       <div className="agent-config-panel" onClick={(e) => e.stopPropagation()}>
@@ -181,12 +293,19 @@ export default function AgentConfigPanel({
             onChange={(e) => onSetProvider(e.target.value as AgentProvider)}
           >
             <option value="local-cli" disabled={loadingClis}>
-              本地 CLI{loadingClis ? '（检测中…）' : availableClis.length === 0 ? '（未检测到 CLI）' : ''}
+              本地 CLI（推荐）{loadingClis ? '（检测中…）' : availableClis.length === 0 ? '（未检测到 CLI）' : ''}
             </option>
             <option value="claude">Claude API</option>
             <option value="openai">OpenAI / 兼容 API</option>
           </select>
         </label>
+
+        <section className={`provider-recommendation ${config.provider === 'local-cli' ? 'selected' : ''}`}>
+          <strong>{config.provider === 'local-cli' ? '当前为推荐模式' : '推荐优先使用本地 CLI'}</strong>
+          <p>
+            本地 CLI 可以复用已安装的 Claude Code 或 OpenCode，适合需要搜索、读写文件、执行命令和使用 skill 的任务。API 模式更适合轻量整理和结构化输出。
+          </p>
+        </section>
 
         {config.provider === 'local-cli' && (
           <label className="config-field">
@@ -220,12 +339,31 @@ export default function AgentConfigPanel({
                 onChange={(e) => onSetApiKey(e.target.value)} placeholder="sk-ant-api03-..." />
             </label>
             <label className="config-field">
-              <span>Model</span>
+              <span>Base URL（可选）</span>
+              <input type="text" value={config.baseUrl || ''}
+                onChange={(e) => onSetBaseUrl(e.target.value)}
+                placeholder={DEFAULT_CLAUDE_BASE_URL} />
+            </label>
+            <div className="config-field">
+              <div className="config-field-heading">
+                <span>Model</span>
+                <button
+                  type="button"
+                  className="config-inline-button"
+                  onClick={fetchApiModels}
+                  disabled={!config.apiKey || modelFetchState.status === 'running'}
+                >
+                  {modelFetchState.status === 'running' ? '获取中…' : '获取模型'}
+                </button>
+              </div>
               <select value={config.model || 'claude-opus-4-20250514'}
                 onChange={(e) => onSetModel(e.target.value)}>
-                {CLAUDE_MODELS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+                {apiModelOptions.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
               </select>
-            </label>
+              {modelFetchState.message ? (
+                <span className={`config-hint ${modelFetchState.status}`}>{modelFetchState.message}</span>
+              ) : null}
+            </div>
           </>
         )}
 
@@ -237,21 +375,34 @@ export default function AgentConfigPanel({
                 onChange={(e) => onSetApiKey(e.target.value)} placeholder="sk-..." />
             </label>
             <label className="config-field">
-              <span>Model</span>
-              <select value={config.model || 'gpt-4o'}
-                onChange={(e) => onSetModel(e.target.value)}>
-                {OPENAI_MODELS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
-              </select>
-            </label>
-            <label className="config-field">
               <span>Base URL（可选）</span>
               <input type="text" value={config.baseUrl || ''}
                 onChange={(e) => onSetBaseUrl(e.target.value)}
-                placeholder="https://api.openai.com/v1" />
+                placeholder={DEFAULT_OPENAI_BASE_URL} />
               <span className="config-hint">
                 支持任何 OpenAI 兼容 API，如 Ollama、LM Studio、DeepSeek 等。
               </span>
             </label>
+            <div className="config-field">
+              <div className="config-field-heading">
+                <span>Model</span>
+                <button
+                  type="button"
+                  className="config-inline-button"
+                  onClick={fetchApiModels}
+                  disabled={!config.apiKey || modelFetchState.status === 'running'}
+                >
+                  {modelFetchState.status === 'running' ? '获取中…' : '获取模型'}
+                </button>
+              </div>
+              <select value={config.model || 'gpt-4o'}
+                onChange={(e) => onSetModel(e.target.value)}>
+                {apiModelOptions.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+              </select>
+              {modelFetchState.message ? (
+                <span className={`config-hint ${modelFetchState.status}`}>{modelFetchState.message}</span>
+              ) : null}
+            </div>
           </>
         )}
 
