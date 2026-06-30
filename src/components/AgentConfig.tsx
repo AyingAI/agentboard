@@ -80,10 +80,10 @@ function createAdapter(config: AgentConfig): AgentAdapter | null {
   if (config.provider === 'local-cli' && config.cliId) {
     return new LocalCliAdapter(config.cliId);
   }
-  if (config.provider === 'claude' && config.apiKey) {
+  if (config.provider === 'claude' && config.apiKey && config.baseUrl?.trim()) {
     return new ClaudeAgentAdapter(config);
   }
-  if (config.provider === 'openai' && config.apiKey) {
+  if (config.provider === 'openai' && config.apiKey && config.baseUrl?.trim()) {
     return new OpenAIAgentAdapter({ apiKey: config.apiKey, model: config.model, baseUrl: config.baseUrl });
   }
   return null;
@@ -169,8 +169,8 @@ export default function AgentConfigPanel({
 
   const canRunSchemaTest = Boolean(
     (config.provider === 'local-cli' && config.cliId) ||
-    (config.provider === 'claude' && config.apiKey) ||
-    (config.provider === 'openai' && config.apiKey),
+    (config.provider === 'claude' && config.apiKey && config.baseUrl?.trim()) ||
+    (config.provider === 'openai' && config.apiKey && config.baseUrl?.trim()),
   );
 
   async function runSchemaTest() {
@@ -235,6 +235,10 @@ export default function AgentConfigPanel({
     if (config.provider !== 'claude' && config.provider !== 'openai') return;
     if (!config.apiKey) {
       setModelFetchState({ status: 'error', message: '请先填写 API Key。' });
+      return;
+    }
+    if (!config.baseUrl?.trim()) {
+      setModelFetchState({ status: 'error', message: '请先填写 Base URL。' });
       return;
     }
 
@@ -339,7 +343,7 @@ export default function AgentConfigPanel({
                 onChange={(e) => onSetApiKey(e.target.value)} placeholder="sk-ant-api03-..." />
             </label>
             <label className="config-field">
-              <span>Base URL（可选）</span>
+              <span>Base URL</span>
               <input type="text" value={config.baseUrl || ''}
                 onChange={(e) => onSetBaseUrl(e.target.value)}
                 placeholder={DEFAULT_CLAUDE_BASE_URL} />
@@ -351,7 +355,7 @@ export default function AgentConfigPanel({
                   type="button"
                   className="config-inline-button"
                   onClick={fetchApiModels}
-                  disabled={!config.apiKey || modelFetchState.status === 'running'}
+                  disabled={!config.apiKey || !config.baseUrl?.trim() || modelFetchState.status === 'running'}
                 >
                   {modelFetchState.status === 'running' ? '获取中…' : '获取模型'}
                 </button>
@@ -375,7 +379,7 @@ export default function AgentConfigPanel({
                 onChange={(e) => onSetApiKey(e.target.value)} placeholder="sk-..." />
             </label>
             <label className="config-field">
-              <span>Base URL（可选）</span>
+              <span>Base URL</span>
               <input type="text" value={config.baseUrl || ''}
                 onChange={(e) => onSetBaseUrl(e.target.value)}
                 placeholder={DEFAULT_OPENAI_BASE_URL} />
@@ -390,7 +394,7 @@ export default function AgentConfigPanel({
                   type="button"
                   className="config-inline-button"
                   onClick={fetchApiModels}
-                  disabled={!config.apiKey || modelFetchState.status === 'running'}
+                  disabled={!config.apiKey || !config.baseUrl?.trim() || modelFetchState.status === 'running'}
                 >
                   {modelFetchState.status === 'running' ? '获取中…' : '获取模型'}
                 </button>

@@ -63,8 +63,8 @@ export default function App() {
   const { config, setApiKey, setModel, setProvider, setCliId, setBaseUrl } = useAgentConfig();
   const isAgentConfigured =
     (config.provider === 'local-cli' && Boolean(config.cliId)) ||
-    (config.provider === 'claude' && Boolean(config.apiKey)) ||
-    (config.provider === 'openai' && Boolean(config.apiKey));
+    (config.provider === 'claude' && Boolean(config.apiKey) && Boolean(config.baseUrl?.trim())) ||
+    (config.provider === 'openai' && Boolean(config.apiKey) && Boolean(config.baseUrl?.trim()));
 
   // ── Drag ──
   const getBoard = useCallback(() => board, [board]);

@@ -160,10 +160,10 @@ export function useAgent(
     if (config.provider === 'local-cli' && config.cliId) {
       return new LocalCliAdapter(config.cliId);
     }
-    if (config.provider === 'claude' && config.apiKey) {
+    if (config.provider === 'claude' && config.apiKey && config.baseUrl?.trim()) {
       return new ClaudeAgentAdapter(config);
     }
-    if (config.provider === 'openai' && config.apiKey) {
+    if (config.provider === 'openai' && config.apiKey && config.baseUrl?.trim()) {
       return new OpenAIAgentAdapter({ apiKey: config.apiKey, model: config.model, baseUrl: config.baseUrl });
     }
     return new NoAgentAdapter();
