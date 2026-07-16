@@ -236,6 +236,8 @@ export interface ActivityEntry {
     optionId?: string;
     message?: string;
   };
+  /** Separates user-facing collaboration history from low-level execution diagnostics. */
+  channel?: 'collaboration' | 'diagnostic';
 }
 
 /** Patch application result */
@@ -297,6 +299,14 @@ export interface AgentConfig {
 
 // ── Board session types ──
 
+export interface AgentTaskPolicy {
+  scope: 'board' | 'selection';
+  selectedNodeIds: string[];
+  allowExistingEdits: boolean;
+  allowDelete: boolean;
+  allowFullBoardLayout: boolean;
+}
+
 /** A single event in a run's history — persisted for resumability across refreshes */
 export interface AgentRunEvent {
   type: 'user_message' | 'agent_interaction_request' | 'user_decision' | 'agent_patch';
@@ -309,6 +319,12 @@ export interface RunState {
   id: string;
   originalUserMessage: string;
   events: AgentRunEvent[];
+  taskPolicy?: AgentTaskPolicy;
+}
+
+export interface BoardHistory {
+  past: BoardDSL[];
+  future: BoardDSL[];
 }
 
 /** A named board session — each session is one conversation */
@@ -320,6 +336,8 @@ export interface BoardSession {
   activities?: ActivityEntry[];
   /** Run context map — persisted so interaction_request resumeRun survives refresh */
   runs?: Record<string, RunState>;
+  /** Transaction-level board history, persisted for undo/redo across refreshes. */
+  history?: BoardHistory;
   createdAt: number;
   updatedAt: number;
 }

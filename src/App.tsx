@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { BoardDSL, BoardEditEvent, BoardNode } from './types/dsl';
+import type { BoardDSL, BoardEditEvent, BoardNode, AgentTaskPolicy } from './types/dsl';
 import { useBoardSessions } from './hooks/useBoardSessions';
 import { useAgent } from './hooks/useAgent';
 import { useAgentConfig } from './hooks/useAgentConfig';
@@ -13,6 +13,15 @@ import ActivityPanel from './components/ActivityPanel';
 import AgentConfigPanel from './components/AgentConfig';
 import AgentRunOverlay from './components/AgentRunOverlay';
 import InteractionToast from './components/InteractionToast';
+import PatchProposalToast from './components/PatchProposalToast';
+import PatchResultToast from './components/PatchResultToast';
+import CanvasToolbar from './components/CanvasToolbar';
+import ShortcutHelp from './components/ShortcutHelp';
+import StorageRecoveryToast from './components/StorageRecoveryToast';
+import { defaultTaskPolicy } from './agent/taskPolicy';
+import { fitBoardViewport } from './engine/viewport';
+import { boardExportFilename, createBoardExport, parseBoardImport } from './engine/boardTransfer';
+import { recordBoardChange, redoBoardChange, undoBoardChange } from './engine/history';
 
 type EditState = {
   nodeId: string;
@@ -48,7 +57,10 @@ export default function App() {
     sessions,
     activeId,
     activeSession,
+    recovery,
     createSession,
+    createSessionFromBoard,
+    dismissRecovery,
     switchSession,
     renameSession,
     deleteSession,
@@ -66,23 +78,17 @@ export default function App() {
     (config.provider === 'claude' && Boolean(config.apiKey) && Boolean(config.baseUrl?.trim())) ||
     (config.provider === 'openai' && Boolean(config.apiKey) && Boolean(config.baseUrl?.trim()));
 
-  // ── Drag ──
+  // ── Transaction history ──
   const getBoard = useCallback(() => board, [board]);
-  const [undoStack, setUndoStack] = useState<BoardDSL[]>([]);
-
-  const pushUndoSnapshot = useCallback((snapshot: BoardDSL) => {
-    setUndoStack((items) => [...items, structuredClone(snapshot)].slice(-MAX_UNDO_HISTORY));
-  }, []);
+  const history = activeSession.history;
 
   const updateBoardWithHistory = useCallback(
     (nextBoard: BoardDSL) => {
       const current = getBoard();
-      if (JSON.stringify(current) !== JSON.stringify(nextBoard)) {
-        pushUndoSnapshot(current);
-      }
-      updateActiveBoard(nextBoard);
+      if (JSON.stringify(current) === JSON.stringify(nextBoard)) return;
+      updateActiveBoard(nextBoard, recordBoardChange(activeSession.history, current));
     },
-    [getBoard, pushUndoSnapshot, updateActiveBoard],
+    [activeSession.history, getBoard, updateActiveBoard],
   );
 
   // ── Canvas pan (Space + drag / middle button) ──
@@ -90,6 +96,9 @@ export default function App() {
     panOffset,
     setPanOffset,
     zoom,
+    setViewport,
+    zoomAt,
+    resetViewport,
     isSpaceHeld,
     isPanning,
     handleCanvasPointerDown,
@@ -144,13 +153,14 @@ export default function App() {
     ({ nodeId, from, to, moves }) => {
       const current = getBoard();
       const moveMap = new Map(moves.map((move) => [move.nodeId, move]));
-      pushUndoSnapshot({
+      const beforeMove = {
         ...current,
         nodes: current.nodes.map((node) => {
           const move = moveMap.get(node.id);
           return move ? { ...node, x: move.from.x, y: move.from.y } : node;
         }),
-      });
+      };
+      updateActiveBoard(current, recordBoardChange(activeSession.history, beforeMove));
       recordEditEvent({
         type: 'node_moved',
         nodeId: moves.length === 1 ? nodeId : undefined,
@@ -233,10 +243,16 @@ export default function App() {
   const {
     isPending,
     lastPatch,
+    pendingPatch,
+    appliedPatch,
     activities,
     providerName,
     submitMessage,
     resumeRun,
+    applyPendingPatch,
+    rejectPendingPatch,
+    undoAppliedPatch,
+    dismissAppliedPatch,
     cancel,
     addActivity,
     resetState: resetAgentState,
@@ -247,12 +263,12 @@ export default function App() {
   useEffect(() => {
     if (prevActiveIdRef.current === activeId) return;
     prevActiveIdRef.current = activeId;
-    setUndoStack([]);
     resetAgentState(activeSession.activities ?? [], activeSession.runs ?? {});
   }, [activeId, activeSession, resetAgentState]);
 
   // ── UI state ──
   const [input, setInput] = useState('');
+  const [taskPolicy, setTaskPolicy] = useState<AgentTaskPolicy>(() => defaultTaskPolicy([]));
   const [isActivityOpen, setActivityOpen] = useState(false);
   const [expandedActivityId, setExpandedActivityId] = useState<string | null>(null);
   const [editState, setEditState] = useState<EditState | null>(null);
@@ -260,10 +276,13 @@ export default function App() {
   const [deepDiveNodeId, setDeepDiveNodeId] = useState<string | null>(null);
   const [deepDiveInput, setDeepDiveInput] = useState('');
   const [showConfig, setShowConfig] = useState(false);
+  const [showShortcutHelp, setShowShortcutHelp] = useState(false);
+  const importInputRef = useRef<HTMLInputElement>(null);
   const [showBoardMenu, setShowBoardMenu] = useState(false);
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState('');
-  const canUndo = undoStack.length > 0;
+  const canUndo = Boolean(history?.past.length);
+  const canRedo = Boolean(history?.future.length);
   const runningActivity = useMemo(
     () => activities.find((item) => item.kind === 'run_progress' && item.progressStatus === 'running') ?? null,
     [activities],
@@ -274,11 +293,24 @@ export default function App() {
   );
   const pendingInteraction = pendingInteractions[0] ?? null;
 
+  useEffect(() => {
+    setTaskPolicy((current) => {
+      if (selectedNodeIds.length === 0) {
+        return current.scope === 'board' && current.selectedNodeIds.length === 0
+          ? current
+          : { ...current, scope: 'board', selectedNodeIds: [] };
+      }
+      return {
+        ...current,
+        selectedNodeIds,
+      };
+    });
+  }, [selectedNodeIds]);
+
   function undoLastBoardChange() {
-    const previousBoard = undoStack[undoStack.length - 1];
-    if (!previousBoard) return;
-    updateActiveBoard(previousBoard);
-    setUndoStack((items) => items.slice(0, -1));
+    const result = undoBoardChange(activeSession.history, board);
+    if (!result) return;
+    updateActiveBoard(result.board, result.history);
     selectNodes([]);
     setSelectedEdgeId(null);
     setEditState(null);
@@ -292,6 +324,23 @@ export default function App() {
     });
   }
 
+  function redoLastBoardChange() {
+    const result = redoBoardChange(activeSession.history, board);
+    if (!result) return;
+    updateActiveBoard(result.board, result.history);
+    selectNodes([]);
+    setSelectedEdgeId(null);
+    setEditState(null);
+    setEdgeEditState(null);
+    setDeepDiveNodeId(null);
+    addActivity({
+      id: makeActivityId(),
+      timestamp: Date.now(),
+      kind: 'system',
+      summary: '已重做白板修改',
+    });
+  }
+
   // ── Keyboard shortcuts ──
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -299,9 +348,22 @@ export default function App() {
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
       if (editState || editingTitle || edgeEditState) return;
 
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z' && !event.shiftKey) {
+      if (event.key === '?') {
         event.preventDefault();
-        undoLastBoardChange();
+        setShowShortcutHelp(true);
+        return;
+      }
+
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z') {
+        event.preventDefault();
+        if (event.shiftKey) redoLastBoardChange();
+        else undoLastBoardChange();
+        return;
+      }
+
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'y') {
+        event.preventDefault();
+        redoLastBoardChange();
         return;
       }
 
@@ -317,12 +379,13 @@ export default function App() {
         setEdgeEditState(null);
         setDeepDiveNodeId(null);
         setShowConfig(false);
+        setShowShortcutHelp(false);
         setShowBoardMenu(false);
       }
     }
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [selectedEdgeId, selectedNodeIds, editState, editingTitle, edgeEditState, undoStack, selectNodes]);
+  }, [selectedEdgeId, selectedNodeIds, editState, editingTitle, edgeEditState, activeSession.history, board, selectNodes]);
 
   // ── Derived ──
   const workspaceClass = [
@@ -493,6 +556,50 @@ export default function App() {
     setEditState({ nodeId: newId, field: 'title' });
   }
 
+  function createNodeAtViewportCenter() {
+    const rect = boardRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    handleCanvasDoubleClick(
+      (rect.width / 2 - panOffset.x) / zoom,
+      (rect.height / 2 - panOffset.y) / zoom,
+    );
+  }
+
+  function fitBoardToViewport() {
+    const rect = boardRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    setViewport(fitBoardViewport(board, rect.width, rect.height, 72));
+  }
+
+  function zoomCanvas(factor: number) {
+    const rect = boardRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    zoomAt(zoom * factor, { x: rect.width / 2, y: rect.height / 2 });
+  }
+
+  function exportCurrentBoard() {
+    const payload = createBoardExport(activeSession);
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = boardExportFilename(activeSession.title);
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function importBoardFile(file: File) {
+    try {
+      const imported = parseBoardImport(await file.text());
+      createSessionFromBoard(imported.board, imported.title);
+      setShowBoardMenu(false);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : '无法导入白板文件。');
+    } finally {
+      if (importInputRef.current) importInputRef.current.value = '';
+    }
+  }
+
   // ── Board title editing ──
   function startTitleEdit() {
     setEditingTitle(true);
@@ -518,8 +625,7 @@ export default function App() {
         previousGroupCount: board.groups.length,
       },
     });
-    pushUndoSnapshot(board);
-    resetActiveBoard();
+    resetActiveBoard(recordBoardChange(activeSession.history, board));
     selectNodes([]);
     setEditState(null);
     setDeepDiveNodeId(null);
@@ -539,7 +645,7 @@ export default function App() {
       setShowConfig(true);
       return;
     }
-    submitMessage(trimmed);
+    submitMessage(trimmed, trimmed, taskPolicy);
     setInput('');
   }
 
@@ -569,7 +675,11 @@ export default function App() {
       return;
     }
 
-    submitMessage(buildNodeDeepDivePrompt(targetNode, trimmed), trimmed);
+    submitMessage(buildNodeDeepDivePrompt(targetNode, trimmed), trimmed, {
+      ...taskPolicy,
+      scope: 'selection',
+      selectedNodeIds: [targetNode.id],
+    });
     setDeepDiveInput('');
     setDeepDiveNodeId(null);
   }
@@ -614,7 +724,16 @@ export default function App() {
                 {sessions.map((s) => (
                   <div
                     key={s.id}
+                    role="button"
+                    tabIndex={0}
+                    aria-current={s.id === activeId ? 'true' : undefined}
                     className={`board-menu-item ${s.id === activeId ? 'active' : ''}`}
+                    onKeyDown={(event) => {
+                      if (event.key !== 'Enter' && event.key !== ' ') return;
+                      event.preventDefault();
+                      switchSession(s.id);
+                      setShowBoardMenu(false);
+                    }}
                     onClick={() => {
                       switchSession(s.id);
                       setShowBoardMenu(false);
@@ -622,7 +741,7 @@ export default function App() {
                   >
                     <span className="board-menu-title">{s.title}</span>
                     <span className="board-menu-meta">
-                      {s.board.nodes.length} nodes ·{' '}
+                      {s.board.nodes.length} 个节点 ·{' '}
                       {new Date(s.updatedAt).toLocaleDateString('zh-CN')}
                     </span>
                     {sessions.length > 1 && (
@@ -644,9 +763,24 @@ export default function App() {
                     )}
                   </div>
                 ))}
+                <div className="board-menu-transfer">
+                  <button type="button" onClick={() => importInputRef.current?.click()}>导入白板</button>
+                  <button type="button" onClick={exportCurrentBoard}>导出当前白板</button>
+                </div>
               </div>
             )}
           </div>
+
+          <input
+            ref={importInputRef}
+            className="hidden-input"
+            type="file"
+            accept=".json,.agentboard.json,application/json"
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              if (file) void importBoardFile(file);
+            }}
+          />
 
           <button
             type="button"
@@ -676,11 +810,20 @@ export default function App() {
           </button>
           <button
             type="button"
+            className="topbar-redo-btn"
+            disabled={!canRedo}
+            onClick={redoLastBoardChange}
+            title="重做白板修改 (⌘⇧Z / Ctrl+Y)"
+          >
+            重做
+          </button>
+          <button
+            type="button"
             className={`${isActivityOpen ? 'active' : ''} ${pendingInteractions.length > 0 ? 'needs-attention' : ''}`}
             onClick={() => setActivityOpen((v) => !v)}
-            title={pendingInteractions.length > 0 ? `${pendingInteractions.length} 个 Agent 请求等待处理` : '查看 Agent Activity'}
+            title={pendingInteractions.length > 0 ? `${pendingInteractions.length} 个 Agent 请求等待处理` : '查看 Agent 历史'}
           >
-            活动{pendingInteractions.length > 0 ? ` · 待确认 ${pendingInteractions.length}` : activities.length > 0 ? ` (${activities.length})` : ''}
+            历史{pendingInteractions.length > 0 ? ` · 待确认 ${pendingInteractions.length}` : activities.length > 0 ? ` (${activities.length})` : ''}
           </button>
           <button
             type="button"
@@ -709,6 +852,10 @@ export default function App() {
             isSpaceHeld={isSpaceHeld}
             isPanning={isPanning}
             isAgentPending={isPending}
+            highlightedNodeIds={appliedPatch?.summary.affectedNodeIds ?? []}
+            highlightedEdgeIds={appliedPatch?.summary.affectedEdgeIds ?? []}
+            isAgentConfigured={isAgentConfigured}
+            configuredCliId={config.provider === 'local-cli' ? config.cliId : undefined}
             panOffset={panOffset}
             zoom={zoom}
             tempLine={tempLine}
@@ -757,7 +904,37 @@ export default function App() {
             onCloseDeepDive={closeNodeDeepDive}
             onDeepDiveInputChange={setDeepDiveInput}
             onSubmitDeepDive={handleDeepDiveSubmit}
+            onConnectCli={(cliId) => {
+              setProvider('local-cli');
+              setCliId(cliId);
+            }}
+            onOpenAgentConfig={() => setShowConfig(true)}
+            onChooseStarterTask={(prompt) => {
+              setInput(prompt);
+              window.requestAnimationFrame(() => {
+                document.querySelector<HTMLTextAreaElement>('.prompt-bar textarea')?.focus();
+              });
+            }}
           />
+
+          <CanvasToolbar
+            zoom={zoom}
+            hasContent={board.nodes.length > 0}
+            onCreateNode={createNodeAtViewportCenter}
+            onZoomIn={() => zoomCanvas(1.2)}
+            onZoomOut={() => zoomCanvas(1 / 1.2)}
+            onResetView={resetViewport}
+            onFitContent={fitBoardToViewport}
+            onOpenShortcuts={() => setShowShortcutHelp(true)}
+          />
+
+          {recovery ? (
+            <StorageRecoveryToast
+              message={recovery.message}
+              onExport={exportCurrentBoard}
+              onDismiss={dismissRecovery}
+            />
+          ) : null}
 
           {runningActivity ? (
             <AgentRunOverlay
@@ -770,7 +947,27 @@ export default function App() {
             />
           ) : null}
 
-          {pendingInteraction ? (
+          {pendingPatch ? (
+            <PatchProposalToast
+              proposal={pendingPatch}
+              onApply={applyPendingPatch}
+              onReject={rejectPendingPatch}
+              onOpenActivity={() => {
+                setActivityOpen(true);
+                setExpandedActivityId(pendingPatch.activityId);
+              }}
+            />
+          ) : appliedPatch ? (
+            <PatchResultToast
+              result={appliedPatch}
+              onUndo={undoAppliedPatch}
+              onDismiss={dismissAppliedPatch}
+              onOpenActivity={() => {
+                setActivityOpen(true);
+                setExpandedActivityId(appliedPatch.activityId);
+              }}
+            />
+          ) : pendingInteraction ? (
             <InteractionToast
               activity={pendingInteraction}
               onRespond={(runId, decision, activityId) => {
@@ -792,6 +989,9 @@ export default function App() {
             isPending={isPending}
             isAgentConfigured={isAgentConfigured}
             providerName={providerName}
+            selectedNodeIds={selectedNodeIds}
+            taskPolicy={taskPolicy}
+            onTaskPolicyChange={setTaskPolicy}
           />
         </section>
 
@@ -807,6 +1007,8 @@ export default function App() {
           />
         ) : null}
       </main>
+
+      {showShortcutHelp ? <ShortcutHelp onClose={() => setShowShortcutHelp(false)} /> : null}
 
       {showConfig ? (
         <AgentConfigPanel

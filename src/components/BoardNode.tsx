@@ -9,6 +9,7 @@ interface BoardNodeProps {
   node: BoardNodeType;
   isSelected: boolean;
   isPrimarySelected: boolean;
+  isAgentChanged: boolean;
   editState: EditState | null;
   onPointerDown: (nodeId: string, event: React.PointerEvent) => void;
   onStartEdit: (nodeId: string, field: 'title' | 'body') => void;
@@ -48,6 +49,7 @@ export default function BoardNode({
   node,
   isSelected,
   isPrimarySelected,
+  isAgentChanged,
   editState,
   onPointerDown,
   onStartEdit,
@@ -70,7 +72,7 @@ export default function BoardNode({
 
   return (
     <article
-      className={`board-node ${node.type} ${tagClasses} ${isSelected ? 'selected' : ''} ${isPrimarySelected ? 'primary-selected' : ''}`}
+      className={`board-node ${node.type} ${tagClasses} ${isSelected ? 'selected' : ''} ${isPrimarySelected ? 'primary-selected' : ''} ${isAgentChanged ? 'agent-changed' : ''}`}
       data-node-id={node.id}
       style={{
         left: node.x,

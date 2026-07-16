@@ -185,6 +185,7 @@ export class LocalCliAdapter implements AgentAdapter {
       runId: request.runId,
       runContext: request.runContext,
       recentEditEvents: request.recentEditEvents,
+      taskPolicy: request.taskPolicy,
     });
 
     let text: string;

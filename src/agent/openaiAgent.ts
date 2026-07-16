@@ -26,6 +26,7 @@ export class OpenAIAgentAdapter implements AgentAdapter {
       runId: request.runId,
       runContext: request.runContext,
       recentEditEvents: request.recentEditEvents,
+      taskPolicy: request.taskPolicy,
     });
     const baseUrl = normalizeOpenAIBaseUrl(this.config.baseUrl);
 

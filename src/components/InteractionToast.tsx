@@ -33,7 +33,7 @@ export default function InteractionToast({
           <h2>{interaction.title}</h2>
         </div>
         <button type="button" className="interaction-toast-activity" onClick={onOpenActivity}>
-          查看 Activity
+          查看历史
         </button>
       </div>
 

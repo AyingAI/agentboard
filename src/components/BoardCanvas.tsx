@@ -1,6 +1,7 @@
 import { useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type FocusEvent } from 'react';
 import type { BoardDSL, BoardNode as BoardNodeType } from '../types/dsl';
 import BoardNode from './BoardNode';
+import EmptyBoardWelcome from './EmptyBoardWelcome';
 
 interface EditState {
   nodeId: string;
@@ -34,6 +35,10 @@ interface BoardCanvasProps {
   isSpaceHeld: boolean;
   isPanning: boolean;
   isAgentPending: boolean;
+  highlightedNodeIds: string[];
+  highlightedEdgeIds: string[];
+  isAgentConfigured: boolean;
+  configuredCliId?: string;
   panOffset: { x: number; y: number };
   zoom: number;
   tempLine: TempLine | null;
@@ -55,6 +60,9 @@ interface BoardCanvasProps {
   onCloseDeepDive: () => void;
   onDeepDiveInputChange: (value: string) => void;
   onSubmitDeepDive: () => void;
+  onConnectCli: (cliId: string) => void;
+  onOpenAgentConfig: () => void;
+  onChooseStarterTask: (prompt: string) => void;
 }
 
 interface SelectionBox {
@@ -295,6 +303,10 @@ export default function BoardCanvas({
   isSpaceHeld,
   isPanning,
   isAgentPending,
+  highlightedNodeIds,
+  highlightedEdgeIds,
+  isAgentConfigured,
+  configuredCliId,
   panOffset,
   zoom,
   tempLine,
@@ -316,6 +328,9 @@ export default function BoardCanvas({
   onCloseDeepDive,
   onDeepDiveInputChange,
   onSubmitDeepDive,
+  onConnectCli,
+  onOpenAgentConfig,
+  onChooseStarterTask,
 }: BoardCanvasProps) {
   const [nodeMeasurements, setNodeMeasurements] = useState<NodeMeasurements>(() => new Map());
   const [selectionBox, setSelectionBox] = useState<SelectionBox | null>(null);
@@ -525,7 +540,7 @@ export default function BoardCanvas({
             const isEditingLabel = edgeEditState?.edgeId === edge.id;
             return (
               <g key={edge.id}
-                className={`edge-item ${isSelected ? 'selected' : ''}`}
+                className={`edge-item ${isSelected ? 'selected' : ''} ${highlightedEdgeIds.includes(edge.id) ? 'agent-changed' : ''}`}
                 onDoubleClick={(e) => {
                   e.stopPropagation();
                   onEdgeLabelDoubleClick(edge.id);
@@ -589,6 +604,7 @@ export default function BoardCanvas({
           <BoardNode key={node.id} node={node}
             isSelected={selectedNodeIds.includes(node.id)}
             isPrimarySelected={selectedNodeId === node.id}
+            isAgentChanged={highlightedNodeIds.includes(node.id)}
             editState={editState}
             onPointerDown={onPointerDown} onStartEdit={onStartEdit}
             onCommitEdit={onCommitEdit} onCancelEdit={onCancelEdit}
@@ -626,9 +642,22 @@ export default function BoardCanvas({
         ) : null}
       </div>
 
-      {/* Empty canvas hint */}
       {board.nodes.length === 0 && (
-        <div className="canvas-empty-hint">双击空白处创建卡片，或在下方向 Agent 描述你的想法</div>
+        <EmptyBoardWelcome
+          isAgentConfigured={isAgentConfigured}
+          configuredCliId={configuredCliId}
+          onConnectCli={onConnectCli}
+          onOpenConfig={onOpenAgentConfig}
+          onChooseTask={onChooseStarterTask}
+          onCreateCard={() => {
+            const rect = boardRef.current?.getBoundingClientRect();
+            if (!rect) return;
+            onCanvasDoubleClick(
+              (rect.width / 2 - panOffset.x) / zoom,
+              (rect.height / 2 - panOffset.y) / zoom,
+            );
+          }}
+        />
       )}
     </div>
   );

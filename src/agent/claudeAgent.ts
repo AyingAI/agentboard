@@ -33,6 +33,7 @@ export class ClaudeAgentAdapter implements AgentAdapter {
       runId: request.runId,
       runContext: request.runContext,
       recentEditEvents: request.recentEditEvents,
+      taskPolicy: request.taskPolicy,
     });
 
     let response: Response;

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { zoomAroundPoint } from '../engine/viewport';
 
 const MIN_ZOOM = 0.35;
 const MAX_ZOOM = 2.4;
@@ -95,10 +96,29 @@ export function useCanvasPan() {
     [panOffset, zoom],
   );
 
+  const setViewport = useCallback((next: { panOffset: { x: number; y: number }; zoom: number }) => {
+    setPanOffset(next.panOffset);
+    setZoom(clampZoom(next.zoom));
+  }, []);
+
+  const zoomAt = useCallback((nextZoom: number, point: { x: number; y: number }) => {
+    const next = zoomAroundPoint({ panOffset, zoom }, clampZoom(nextZoom), point);
+    setPanOffset(next.panOffset);
+    setZoom(next.zoom);
+  }, [panOffset, zoom]);
+
+  const resetViewport = useCallback(() => {
+    setPanOffset({ x: 0, y: 0 });
+    setZoom(1);
+  }, []);
+
   return {
     panOffset,
     setPanOffset,
     zoom,
+    setViewport,
+    zoomAt,
+    resetViewport,
     isSpaceHeld,
     isPanning,
     handleCanvasPointerDown,

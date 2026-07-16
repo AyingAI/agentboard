@@ -1,4 +1,5 @@
-import type { BoardDSL, BoardEditEvent, BoardEdge, BoardNode, DSLPatch, LayoutAlgorithm } from '../types/dsl';
+import type { BoardDSL, BoardEditEvent, BoardEdge, BoardNode, DSLPatch, LayoutAlgorithm, AgentTaskPolicy } from '../types/dsl';
+import { describeTaskPolicy } from './taskPolicy';
 
 const SYSTEM_PROMPT = `You are an AgentBoard collaborator. You work with a human user to build and maintain a structured whiteboard. The whiteboard is represented as a JSON DSL (domain-specific language). Your job is to return either:
 
@@ -647,6 +648,7 @@ interface UserMessageOptions {
   runId?: string;
   runContext?: unknown[];
   recentEditEvents?: BoardEditEvent[];
+  taskPolicy?: AgentTaskPolicy;
 }
 
 /** Build the user message for a single agent call */
@@ -655,6 +657,9 @@ export function buildUserMessage(board: BoardDSL, userMessage: string, options: 
     ? `\nRun context events:\n\`\`\`json\n${JSON.stringify(options.runContext, null, 2)}\n\`\`\`\n`
     : '';
   const layoutPreflight = buildLayoutIntentPreflight(userMessage);
+  const taskPolicy = options.taskPolicy
+    ? `\n${describeTaskPolicy(options.taskPolicy)}\n`
+    : '';
 
   // Delta-first path: recent edits exist and the request does NOT look global
   const useDelta = options.recentEditEvents?.length && !isGlobalRequest(userMessage);
@@ -667,7 +672,7 @@ ${JSON.stringify(packet, null, 2)}
 \`\`\`
 
 Run id: ${options.runId ?? 'run_unspecified'}${runContext}
-${layoutPreflight}
+${taskPolicy}${layoutPreflight}
 User request: ${userMessage}
 
 Return exactly one JSON object: either a DSLPatch if the board can be updated now, or an interaction_request if you need user choice, authorization, or clarification before continuing.`;
@@ -685,7 +690,7 @@ ${JSON.stringify(truncated, null, 2)}
 \`\`\`
 
 Run id: ${options.runId ?? 'run_unspecified'}${runContext}${recentEdits}
-${layoutPreflight}
+${taskPolicy}${layoutPreflight}
 User request: ${userMessage}
 
 Return exactly one JSON object: either a DSLPatch if the board can be updated now, or an interaction_request if you need user choice, authorization, or clarification before continuing.`;

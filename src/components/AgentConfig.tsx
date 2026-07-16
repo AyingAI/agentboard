@@ -291,7 +291,7 @@ export default function AgentConfigPanel({
         </div>
 
         <label className="config-field">
-          <span>Provider</span>
+          <span>连接方式</span>
           <select
             value={config.provider}
             onChange={(e) => onSetProvider(e.target.value as AgentProvider)}
@@ -350,7 +350,7 @@ export default function AgentConfigPanel({
             </label>
             <div className="config-field">
               <div className="config-field-heading">
-                <span>Model</span>
+                <span>模型</span>
                 <button
                   type="button"
                   className="config-inline-button"
@@ -389,7 +389,7 @@ export default function AgentConfigPanel({
             </label>
             <div className="config-field">
               <div className="config-field-heading">
-                <span>Model</span>
+                <span>模型</span>
                 <button
                   type="button"
                   className="config-inline-button"

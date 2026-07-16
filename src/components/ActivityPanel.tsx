@@ -1,14 +1,15 @@
 import { useEffect, useState } from 'react';
 import type { ActivityEntry, ActivityProgressStep } from '../types/dsl';
 import type { InteractionDecision } from '../hooks/useAgent';
+import { activitiesForView, viewForActivity, type ActivityView } from '../agent/activityViews';
 
 const KIND_LABEL: Record<ActivityEntry['kind'], string> = {
-  user_message: '↗',
-  system: '⚙',
-  agent_patch: '🤖',
-  validation_error: '⚠',
-  needs_input: '↳',
-  run_progress: '●',
+  user_message: '你',
+  system: '系',
+  agent_patch: 'AI',
+  validation_error: '!',
+  needs_input: '问',
+  run_progress: '·',
 };
 
 const STEP_LABEL: Record<ActivityProgressStep['status'], string> = {
@@ -40,15 +41,20 @@ export default function ActivityPanel({
   onToggleExpand,
   onRespondToInteraction,
 }: ActivityPanelProps) {
-  const [filter, setFilter] = useState<'all' | 'user_message'>('all');
+  const [view, setView] = useState<ActivityView>('collaboration');
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [copyFailedId, setCopyFailedId] = useState<string | null>(null);
   const [now, setNow] = useState(Date.now());
-  const visibleActivities = filter === 'user_message'
-    ? activities.filter((item) => item.kind === 'user_message')
-    : activities;
-  const userMessageCount = activities.filter((item) => item.kind === 'user_message').length;
+  const visibleActivities = activitiesForView(activities, view);
+  const collaborationCount = activitiesForView(activities, 'collaboration').length;
+  const diagnosticCount = activitiesForView(activities, 'diagnostics').length;
+
+  useEffect(() => {
+    if (!expandedId) return;
+    const expandedActivity = activities.find((item) => item.id === expandedId);
+    if (expandedActivity) setView(viewForActivity(expandedActivity));
+  }, [activities, expandedId]);
 
   useEffect(() => {
     const hasRunning = activities.some((item) =>
@@ -82,31 +88,40 @@ export default function ActivityPanel({
   return (
     <aside className="activity-panel">
       <div className="activity-header">
-        <h1>Agent Activity</h1>
+        <div>
+          <h1>Agent 历史</h1>
+          <p>{view === 'collaboration' ? '需求、确认和白板变更' : '调用、校验和错误详情'}</p>
+        </div>
         <button type="button" className="ghost small" onClick={onClose} title="关闭活动面板">
           ✕
         </button>
       </div>
-      <div className="activity-filter" role="tablist" aria-label="Activity 筛选">
+      <div className="activity-filter" role="tablist" aria-label="Agent 历史视图">
         <button
           type="button"
-          className={filter === 'all' ? 'active' : ''}
-          onClick={() => setFilter('all')}
+          role="tab"
+          aria-selected={view === 'collaboration'}
+          className={view === 'collaboration' ? 'active' : ''}
+          onClick={() => setView('collaboration')}
         >
-          全部
+          协作记录{collaborationCount > 0 ? ` ${collaborationCount}` : ''}
         </button>
         <button
           type="button"
-          className={filter === 'user_message' ? 'active' : ''}
-          onClick={() => setFilter('user_message')}
+          role="tab"
+          aria-selected={view === 'diagnostics'}
+          className={view === 'diagnostics' ? 'active' : ''}
+          onClick={() => setView('diagnostics')}
         >
-          用户指令{userMessageCount > 0 ? ` ${userMessageCount}` : ''}
+          运行日志{diagnosticCount > 0 ? ` ${diagnosticCount}` : ''}
         </button>
       </div>
       <div className="activity-list">
         {visibleActivities.length === 0 ? (
           <div className="activity-empty">
-            {filter === 'user_message' ? '还没有用户指令记录。' : '暂无 Activity。'}
+            {view === 'collaboration'
+              ? '还没有协作记录。发送第一条指令后，需求和变更会出现在这里。'
+              : '暂无运行日志。Agent 调用、校验和错误信息会出现在这里。'}
           </div>
         ) : null}
         {visibleActivities.map((item) => {

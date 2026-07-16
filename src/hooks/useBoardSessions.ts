@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import type { ActivityEntry, BoardDSL, BoardSession, RunState } from '../types/dsl';
+import type { ActivityEntry, BoardDSL, BoardHistory, BoardSession, RunState } from '../types/dsl';
 import { emptyBoard } from '../data/initialBoard';
 import { loadSessions, saveSessions } from '../storage';
 
@@ -23,6 +23,7 @@ export function useBoardSessions() {
   const sessions = data.sessions;
   const activeId = data.activeId;
   const activeSession = sessions.find((s) => s.id === activeId) ?? sessions[0];
+  const recovery = data.recovery;
 
   const persist = useCallback((next: typeof data) => {
     setData(next);
@@ -40,6 +41,23 @@ export function useBoardSessions() {
       sessions: [...data.sessions, session],
       activeId: session.id,
     });
+  }, [data, persist]);
+
+  const createSessionFromBoard = useCallback((board: BoardDSL, title?: string) => {
+    const importedBoard = structuredClone(board);
+    if (title?.trim()) importedBoard.board.title = title.trim();
+    const session = newSession(importedBoard);
+    persist({
+      sessions: [...data.sessions, session],
+      activeId: session.id,
+    });
+    return session.id;
+  }, [data, persist]);
+
+  const dismissRecovery = useCallback(() => {
+    if (!data.recovery) return;
+    const { recovery: _recovery, ...next } = data;
+    persist(next);
   }, [data, persist]);
 
   const switchSession = useCallback(
@@ -78,10 +96,15 @@ export function useBoardSessions() {
   );
 
   const updateActiveBoard = useCallback(
-    (board: BoardDSL) => {
+    (board: BoardDSL, history?: BoardHistory) => {
       persist({
         sessions: data.sessions.map((s) =>
-          s.id === data.activeId ? { ...s, board, updatedAt: Date.now() } : s,
+          s.id === data.activeId ? {
+            ...s,
+            board,
+            history: history ?? s.history,
+            updatedAt: Date.now(),
+          } : s,
         ),
         activeId: data.activeId,
       });
@@ -89,10 +112,10 @@ export function useBoardSessions() {
     [data, persist],
   );
 
-  const resetBoard = useCallback(() => {
+  const resetBoard = useCallback((history?: BoardHistory) => {
     const fresh = JSON.parse(JSON.stringify(emptyBoard)) as BoardDSL;
     fresh.board.title = activeSession.title;
-    updateActiveBoard(fresh);
+    updateActiveBoard(fresh, history);
   }, [activeSession?.title, updateActiveBoard]);
 
   const updateActiveAgentState = useCallback(
@@ -111,7 +134,10 @@ export function useBoardSessions() {
     sessions,
     activeId,
     activeSession,
+    recovery,
     createSession,
+    createSessionFromBoard,
+    dismissRecovery,
     switchSession,
     renameSession,
     deleteSession,

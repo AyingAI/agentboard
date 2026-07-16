@@ -1,4 +1,4 @@
-import type { AgentConfig, BoardDSL, BoardEditEvent, DSLPatch, InteractionRequest, PatchOpType, AgentRunEvent, RunState } from '../types/dsl';
+import type { AgentConfig, AgentTaskPolicy, BoardDSL, BoardEditEvent, DSLPatch, InteractionRequest, PatchOpType, AgentRunEvent, RunState } from '../types/dsl';
 
 export type AgentProgressEventType = 'connected' | 'working' | 'tool' | 'output' | 'heartbeat';
 
@@ -15,6 +15,7 @@ export interface AgentRequest {
   boardState: BoardDSL;
   userMessage: string;
   selectedNodeIds?: string[];
+  taskPolicy?: AgentTaskPolicy;
   allowedOps?: PatchOpType[];
   runId?: string;
   runContext?: AgentRunEvent[];

@@ -106,6 +106,25 @@ describe('buildUserMessage', () => {
     expect(msg).toContain('Run id: run_test');
   });
 
+  it('should include task scope and permissions when provided', () => {
+    const board = makeBoard(2);
+    const msg = buildUserMessage(board, 'expand the selected node', {
+      runId: 'run_policy',
+      taskPolicy: {
+        scope: 'selection',
+        selectedNodeIds: ['n0'],
+        allowExistingEdits: false,
+        allowDelete: false,
+        allowFullBoardLayout: false,
+      },
+    });
+
+    expect(msg).toContain('Task scope and permissions');
+    expect(msg).toContain('selected nodes: n0');
+    expect(msg).toContain('only add new content');
+    expect(msg).toContain('Do not emit delete_node');
+  });
+
   it('should include run context when provided', () => {
     const board = makeBoard(1);
     const msg = buildUserMessage(board, 'continue', {

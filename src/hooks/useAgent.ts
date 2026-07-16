@@ -3,6 +3,7 @@ import type {
   ActivityEntry,
   ActivityProgressStatus,
   ActivityProgressStep,
+  AgentTaskPolicy,
   BoardDSL,
   BoardEditEvent,
   DSLPatch,
@@ -23,6 +24,27 @@ import { OpenAIAgentAdapter } from '../agent/openaiAgent';
 import { normalizePatchForUserIntent } from '../agent/prompts';
 import { isAborted, withRetry } from '../agent/resilience';
 import { applyPatch } from '../engine/patch';
+import { assessPatchRisk, type PatchRiskAssessment } from '../agent/patchRisk';
+import { summarizePatchChanges, type PatchChangeSummary } from '../agent/patchSummary';
+import { validatePatchPolicy } from '../agent/taskPolicy';
+
+export type AppliedAgentPatch = {
+  id: string;
+  runId: string;
+  activityId: string;
+  patch: DSLPatch;
+  summary: PatchChangeSummary;
+  beforeBoard: BoardDSL;
+  afterBoard: BoardDSL;
+};
+
+export type PendingAgentPatch = {
+  id: string;
+  runId: string;
+  activityId: string;
+  patch: DSLPatch;
+  risk: PatchRiskAssessment;
+};
 
 export type InteractionDecision = {
   optionId?: string;
@@ -54,6 +76,7 @@ function makeActivity(
     kind,
     summary,
     detail,
+    channel: kind === 'run_progress' || kind === 'validation_error' ? 'diagnostic' : 'collaboration',
     ...extra,
   };
 }
@@ -144,6 +167,8 @@ export function useAgent(
 ) {
   const [isPending, setIsPending] = useState(false);
   const [lastPatch, setLastPatch] = useState<DSLPatch | null>(null);
+  const [pendingPatch, setPendingPatch] = useState<PendingAgentPatch | null>(null);
+  const [appliedPatch, setAppliedPatch] = useState<AppliedAgentPatch | null>(null);
   const [activities, setActivities] = useState<ActivityEntry[]>(() => options.initialActivities ?? []);
   const [runs, setRuns] = useState<Record<string, RunState>>(() => options.initialRuns ?? {});
   const abortRef = useRef<AbortController | null>(null);
@@ -211,7 +236,7 @@ export function useAgent(
   }, []);
 
   const executeRun = useCallback(
-    async (run: RunState, userMessage: string, resumeActivityId?: string) => {
+    async (run: RunState, userMessage: string, resumeActivityId?: string, taskPolicy?: AgentTaskPolicy) => {
       setIsPending(true);
       const progressActivity = makeActivity(
         'run_progress',
@@ -259,6 +284,8 @@ export function useAgent(
         runId: run.id,
         runContext: run.events,
         recentEditEvents: options.getRecentEditEvents?.() ?? [],
+        selectedNodeIds: taskPolicy?.selectedNodeIds,
+        taskPolicy,
         signal: controller.signal,
         onProgress: handleAgentProgress,
       };
@@ -280,7 +307,9 @@ export function useAgent(
               activeStepId: 'call',
             });
             setActivities((items) => [
-              makeActivity('system', `[${providerName}] 第 ${attempt} 次重试…`, reason),
+              makeActivity('system', `[${providerName}] 第 ${attempt} 次重试…`, reason, {
+                channel: 'diagnostic',
+              }),
               ...items,
             ]);
           },
@@ -336,6 +365,27 @@ export function useAgent(
           activeStepId: 'validate',
         });
         const { board: resultBoard, result } = applyPatch(currentBoard, patch);
+        const policyViolations = taskPolicy ? validatePatchPolicy(patch, taskPolicy) : [];
+        if (policyViolations.length > 0) {
+          updateRunProgress(progressActivity.id, {
+            summary: `[${providerName}] 修改超出授权范围`,
+            detail: policyViolations.map((violation) => violation.message).join('\n'),
+            status: 'failed',
+            activeStepId: 'validate',
+            errorStepId: 'validate',
+            completed: true,
+          });
+          setActivities((items) => [
+            makeActivity(
+              'validation_error',
+              `[${providerName}] 修改超出当前作用范围或权限，未应用到白板`,
+              policyViolations.map((violation) => violation.message).join('\n'),
+              { runId: run.id },
+            ),
+            ...items,
+          ]);
+          return;
+        }
         setLastPatch(patch);
 
         if (!result.applied) {
@@ -363,7 +413,36 @@ export function useAgent(
           detail: `校验通过，正在应用 ${result.appliedOps} 个修改。`,
           activeStepId: 'apply',
         });
+
+        const risk = assessPatchRisk(patch);
+        if (risk.requiresConfirmation) {
+          setPendingPatch({
+            id: `proposal_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+            runId: run.id,
+            activityId: progressActivity.id,
+            patch,
+            risk,
+          });
+          updateRunProgress(progressActivity.id, {
+            summary: `[${providerName}] 等待确认高风险修改`,
+            detail: `已校验 ${result.appliedOps} 个修改，但尚未应用到白板。`,
+            status: 'completed',
+            activeStepId: 'apply',
+            completed: true,
+          });
+          return;
+        }
+
         setBoard(resultBoard);
+        setAppliedPatch({
+          id: `applied_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+          runId: run.id,
+          activityId: progressActivity.id,
+          patch,
+          summary: summarizePatchChanges(patch, resultBoard),
+          beforeBoard: currentBoard,
+          afterBoard: resultBoard,
+        });
         options.onAgentPatchApplied?.();
         const patchEvent: AgentRunEvent = {
           type: 'agent_patch',
@@ -401,7 +480,7 @@ export function useAgent(
             completed: true,
           });
           setActivities((items) => [
-            makeActivity('system', `[${providerName}] 已取消`),
+            makeActivity('system', `[${providerName}] 已取消`, undefined, { channel: 'diagnostic' }),
             ...items,
           ]);
           return;
@@ -437,7 +516,7 @@ export function useAgent(
   }, []);
 
   const submitMessage = useCallback(
-    async (message: string, displayMessage = message) => {
+    async (message: string, displayMessage = message, taskPolicy?: AgentTaskPolicy) => {
       const runId = makeRunId();
       const userEvent: AgentRunEvent = {
         type: 'user_message',
@@ -448,6 +527,7 @@ export function useAgent(
         id: runId,
         originalUserMessage: message,
         events: [userEvent],
+        taskPolicy,
       };
       setRuns((prev) => ({ ...prev, [runId]: run }));
       setActivities((items) => [
@@ -459,7 +539,7 @@ export function useAgent(
         ),
         ...items,
       ]);
-      await executeRun(run, message);
+      await executeRun(run, message, undefined, taskPolicy);
     },
     [executeRun],
   );
@@ -507,22 +587,123 @@ export function useAgent(
         .filter(Boolean)
         .join('\n');
 
-      await executeRun(nextRun, resumeMessage, activityId);
+      await executeRun(nextRun, resumeMessage, activityId, run.taskPolicy);
     },
     [executeRun, providerName, runs],
   );
 
+  const applyPendingPatch = useCallback(() => {
+    if (!pendingPatch) return;
+    const currentBoard = getBoard();
+    const { board: nextBoard, result } = applyPatch(currentBoard, pendingPatch.patch);
+    if (!result.applied) {
+      setActivities((items) => [
+        makeActivity(
+          'validation_error',
+          `[${providerName}] 提案无法应用到当前白板`,
+          result.errors.map((error) => error.message).join('\n'),
+          { runId: pendingPatch.runId },
+        ),
+        ...items,
+      ]);
+      setPendingPatch(null);
+      return;
+    }
+    setBoard(nextBoard);
+    setAppliedPatch({
+      id: `applied_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+      runId: pendingPatch.runId,
+      activityId: pendingPatch.activityId,
+      patch: pendingPatch.patch,
+      summary: summarizePatchChanges(pendingPatch.patch, nextBoard),
+      beforeBoard: currentBoard,
+      afterBoard: nextBoard,
+    });
+    options.onAgentPatchApplied?.();
+    const patchEvent: AgentRunEvent = {
+      type: 'agent_patch',
+      timestamp: Date.now(),
+      payload: pendingPatch.patch,
+    };
+    setRuns((prev) => {
+      const run = prev[pendingPatch.runId];
+      if (!run) return prev;
+      return {
+        ...prev,
+        [run.id]: { ...run, events: [...run.events, patchEvent] },
+      };
+    });
+    setActivities((items) => [
+      makeActivity(
+        'agent_patch',
+        `[${providerName}] 已确认并应用：${pendingPatch.patch.summary}`,
+        JSON.stringify(pendingPatch.patch.ops, null, 2),
+        { runId: pendingPatch.runId },
+      ),
+      ...items,
+    ]);
+    setPendingPatch(null);
+  }, [getBoard, options, pendingPatch, providerName, setBoard]);
+
+  const rejectPendingPatch = useCallback(() => {
+    if (!pendingPatch) return;
+    setActivities((items) => [
+      makeActivity('system', `[${providerName}] 已放弃提议的修改`, pendingPatch.patch.summary, {
+        runId: pendingPatch.runId,
+      }),
+      ...items,
+    ]);
+    setPendingPatch(null);
+  }, [pendingPatch, providerName]);
+
+  const undoAppliedPatch = useCallback(() => {
+    if (!appliedPatch) return;
+    if (JSON.stringify(getBoard()) !== JSON.stringify(appliedPatch.afterBoard)) {
+      setActivities((items) => [
+        makeActivity(
+          'system',
+          '无法直接撤销 Agent 修改：白板随后又发生了变化',
+          '请使用顶部的逐步撤销，避免覆盖更新后的内容。',
+          { runId: appliedPatch.runId },
+        ),
+        ...items,
+      ]);
+      setAppliedPatch(null);
+      return;
+    }
+    setBoard(appliedPatch.beforeBoard);
+    setActivities((items) => [
+      makeActivity('system', `[${providerName}] 已撤销本次 Agent 修改`, appliedPatch.patch.summary, {
+        runId: appliedPatch.runId,
+      }),
+      ...items,
+    ]);
+    setAppliedPatch(null);
+  }, [appliedPatch, getBoard, providerName, setBoard]);
+
+  const dismissAppliedPatch = useCallback(() => {
+    setAppliedPatch(null);
+  }, []);
+
   return {
     isPending,
     lastPatch,
+    pendingPatch,
+    appliedPatch,
     activities,
     providerName,
     submitMessage,
     resumeRun,
+    applyPendingPatch,
+    rejectPendingPatch,
+    undoAppliedPatch,
+    dismissAppliedPatch,
     cancel,
     addActivity,
     setLastPatch,
     resetState: useCallback((nextActivities: ActivityEntry[], nextRuns: Record<string, RunState>) => {
+      setPendingPatch(null);
+      setAppliedPatch(null);
       setActivities(nextActivities);
       setRuns(nextRuns);
     }, []),

@@ -4,10 +4,17 @@ import type { AgentConfig } from './types/dsl';
 const SESSIONS_KEY = 'agentboard.sessions';
 const OLD_BOARD_KEY = 'agentboard.phase1.board';
 const CONFIG_KEY = 'agentboard.config';
+const SESSIONS_BACKUP_KEY = 'agentboard.sessions.backup';
+
+export type StorageRecovery = {
+  source: 'backup';
+  message: string;
+};
 
 interface SessionsData {
   sessions: BoardSession[];
   activeId: string;
+  recovery?: StorageRecovery;
 }
 
 function makeSessionId(): string {
@@ -38,14 +45,27 @@ function migrateOldBoard(): BoardSession | null {
 // ── Session storage ──
 
 export function loadSessions(fallbackBoard: BoardDSL): SessionsData {
-  try {
-    const raw = localStorage.getItem(SESSIONS_KEY);
-    if (raw) {
+  const raw = localStorage.getItem(SESSIONS_KEY);
+  if (raw) {
+    try {
       const data = JSON.parse(raw) as SessionsData;
       if (data.sessions?.length > 0 && data.activeId) return data;
+    } catch {
+      const backupRaw = localStorage.getItem(SESSIONS_BACKUP_KEY);
+      if (backupRaw) {
+        try {
+          const backup = JSON.parse(backupRaw) as SessionsData;
+          if (backup.sessions?.length > 0 && backup.activeId) {
+            return {
+              ...backup,
+              recovery: { source: 'backup', message: '主存储损坏，已从最近一次本地备份恢复。' },
+            };
+          }
+        } catch {
+          // Both copies are invalid; continue to migration or a fresh board.
+        }
+      }
     }
-  } catch {
-    // Corrupted data — fall through to fallback
   }
 
   // Try migration from old format
@@ -70,7 +90,10 @@ export function loadSessions(fallbackBoard: BoardDSL): SessionsData {
 }
 
 export function saveSessions(data: SessionsData): void {
-  localStorage.setItem(SESSIONS_KEY, JSON.stringify(data));
+  const current = localStorage.getItem(SESSIONS_KEY);
+  if (current) localStorage.setItem(SESSIONS_BACKUP_KEY, current);
+  const { recovery: _recovery, ...persisted } = data;
+  localStorage.setItem(SESSIONS_KEY, JSON.stringify(persisted));
 }
 
 export function clearSessionsStorage(): void {

@@ -67,6 +67,49 @@ describe('session storage', () => {
     expect(data.sessions[0].board.board.title).toBe('新白板');
   });
 
+  it('recovers from the latest local backup when primary session storage is corrupted', () => {
+    const backup = {
+      sessions: [{
+        id: 'session_backup',
+        title: '恢复的白板',
+        board: boardWithOneNode(),
+        createdAt: 1,
+        updatedAt: 2,
+      }],
+      activeId: 'session_backup',
+    };
+    localStorage.setItem('agentboard.sessions', '{broken');
+    localStorage.setItem('agentboard.sessions.backup', JSON.stringify(backup));
+
+    const data = loadSessions(emptyBoard);
+
+    expect(data.activeId).toBe('session_backup');
+    expect(data.recovery?.source).toBe('backup');
+    expect(data.sessions[0].board.nodes[0].title).toBe('只存在本机');
+  });
+
+  it('loads persisted transaction history for undo and redo after refresh', () => {
+    const currentBoard = boardWithOneNode();
+    const previousBoard = { ...emptyBoard, board: { ...emptyBoard.board, title: '之前版本' } };
+    const nextBoard = { ...currentBoard, board: { ...currentBoard.board, title: '重做版本' } };
+    localStorage.setItem('agentboard.sessions', JSON.stringify({
+      sessions: [{
+        id: 'session_history',
+        title: '本地历史',
+        board: currentBoard,
+        history: { past: [previousBoard], future: [nextBoard] },
+        createdAt: 1,
+        updatedAt: 2,
+      }],
+      activeId: 'session_history',
+    }));
+
+    const data = loadSessions(emptyBoard);
+
+    expect(data.sessions[0].history?.past[0].board.title).toBe('之前版本');
+    expect(data.sessions[0].history?.future[0].board.title).toBe('重做版本');
+  });
+
   it('keeps existing history isolated in browser localStorage only', () => {
     const localSession = {
       sessions: [
