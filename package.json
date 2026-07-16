@@ -1,6 +1,6 @@
 {
   "name": "agentboard",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Agent-native structured canvas for human-agent collaboration.",
   "type": "module",
   "license": "MIT",
