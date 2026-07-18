@@ -7,6 +7,8 @@
 ![status](https://img.shields.io/badge/status-prototype-blue)
 ![license](https://img.shields.io/badge/license-MIT-green)
 
+![AgentBoard cover](./assets/agentboard-cover.png)
+
 AgentBoard 把和 Agent 的对话变成一张可编辑画布。用户可以让 Agent 拆解产品、梳理 workflow、画架构图或决策树；Agent 返回结构化白板操作；用户再移动卡片、编辑文字、创建连线，并基于更新后的白板继续对话。
 
 ## 它能做什么
