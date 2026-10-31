@@ -4,6 +4,11 @@ The 0.3.0–0.3.4 entries below record development milestones included in v0.3.5
 
 ## 0.3.5 — 2026-10-31
 
+**Core addition: open, interactive visualization on the canvas.** Agents can generate HTML, SVG and JavaScript diagrams, charts, explanations, simulations and runnable prototypes. Users can operate the results and keep refining them with the agent.
+
+- Add an isolated visual runtime on card/note nodes with persistent interaction state and automatic restoration of native controls.
+- Reference visual details and discuss the current source, parameters and selected element with an agent. Review revisions before applying them, preserving user state and detecting conflicting later edits.
+- Let models choose visual expression without a fixed component catalog, alongside ordinary cards, notes, groups and edges. Include an interactive example that works before an agent is configured.
 - Float the composer over the center of a full-height canvas. Start with a compact strip, expand on click or focus, collapse empty input on dismissal, and keep the stop action available in either state. Explicit framing reserves the dock's measured height.
 - Preserve separate drafts per board and across refreshes; clear selection, visual reference and recent human-edit context when switching boards. Debounce draft storage and flush before leaving the page.
 - Persist unaccepted modification proposals with their base board so review survives reloads and board switches. Keep conflict checks when accepting and remove saved proposals after acceptance or rejection.

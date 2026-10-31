@@ -1,12 +1,27 @@
 # AgentBoard
 
-**A shared, editable canvas for ongoing collaboration with an AI agent.**
+**Generate interactive visualizations from natural language and keep creating with AI on the same canvas.**
 
-AgentBoard is a local-first structured whiteboard. Describe an idea, understand a system or compare options; edit the cards, interact with a visual, then ask an agent to continue from the current state.
+AgentBoard is a local-first visual collaboration canvas. Describe a question or an idea, let an agent create diagrams, interactive charts, simulations or runnable prototypes, then interact with the result and continue refining it together.
 
 [中文](./README.md) · [v0.3.5 changelog](./CHANGELOG.md) · [Contributing](./CONTRIBUTING.md)
 
 ![AgentBoard cover](./assets/agentboard-cover.png)
+
+## The core addition in v0.3.5: interactive visualization
+
+This release adds open-ended visual generation and execution. Agents can use HTML, SVG and JavaScript to turn a conversation into canvas content that users can inspect, operate and refine.
+
+- **Generate visualizations:** describe a problem and let the agent choose a diagram, interactive chart, explainer, simulation or runnable prototype.
+- **Interact directly:** adjust parameters, switch conditions and observe results. Interaction state persists with the board across reloads and expansion.
+- **Discuss specific details:** reference an element or discuss a visual with its source, current parameters and selected detail in context. Compare the agent's proposed revision before accepting it.
+- **Keep expression open:** models author the visual content without a fixed component catalog. Combine visuals with cards, notes, groups and connections.
+
+For example:
+
+> Turn browser caching into an interactive visualization. Let me switch cache conditions and observe how request paths and results change. Save my choices so I can reference a detail and ask a follow-up.
+
+Before connecting an agent, try the included compound-interest lab and change its parameters to explore the interaction.
 
 ## Quick start
 
@@ -25,10 +40,9 @@ Open the local URL printed in the terminal, normally `http://127.0.0.1:5173`.
 - **Connect an agent:** open settings and select an installed, authenticated local CLI, or configure Claude / an OpenAI-compatible API.
 - **Start collaborating:** choose a starter task or activate the floating input strip. Select existing content to focus the next discussion on it.
 
-## Highlights in v0.3.5
+## Supporting experience improvements
 
 - **More canvas space:** the centered floating composer starts as a compact strip, expands on activation and collapses when empty and dismissed. Both sides of the canvas remain usable. Stop a run or write the next draft while waiting.
-- **Interactive content:** models can create HTML, SVG and JavaScript explanations, simulations and prototypes inside cards. Parameters and interaction state persist with the board.
 - **Continuity:** boards keep separate drafts, run records and pending proposals across reloads and board switches. One-click next steps execute without replacing an unsent draft.
 - **Reviewable changes:** low-risk additions apply directly; content rewrites, node/edge/group deletion and full-board layouts require confirmation. Compare versions and protect later human edits from stale proposals.
 - **Readable large boards:** measured card dimensions drive collision avoidance. Reading view, overview, content navigation and wheel panning help explore larger boards.
