@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { emptyBoard } from '../data/initialBoard';
-import { loadSessions } from '../storage';
+import { loadSessions, saveSessions } from '../storage';
 import type { BoardDSL } from '../types/dsl';
 
 function createLocalStorageStub(): Storage {
@@ -108,6 +108,47 @@ describe('session storage', () => {
 
     expect(data.sessions[0].history?.past[0].board.title).toBe('之前版本');
     expect(data.sessions[0].history?.future[0].board.title).toBe('重做版本');
+  });
+
+  it.each([null, '{}', '{"sessions":[null],"activeId":"bad"}'])('recovers a backup when the primary is missing or structurally invalid: %s', raw => {
+    const backup = { sessions: [{ id: 's', title: '草稿', board: boardWithOneNode(), createdAt: 1, updatedAt: 1 }], activeId: 's' };
+    if (raw) localStorage.setItem('agentboard.sessions', raw);
+    localStorage.setItem('agentboard.sessions.backup', JSON.stringify(backup));
+    expect(loadSessions(emptyBoard)).toMatchObject({ ...backup, recovery: { source: 'backup' } });
+  });
+
+  it('preserves the good backup when saving immediately after recovery', () => {
+    const backup = { sessions: [{ id: 's', title: '本地内容', board: boardWithOneNode(), createdAt: 1, updatedAt: 1 }], activeId: 's' };
+    localStorage.setItem('agentboard.sessions', '{broken');
+    localStorage.setItem('agentboard.sessions.backup', JSON.stringify(backup));
+    const recovered = loadSessions(emptyBoard);
+    saveSessions(recovered);
+    expect(JSON.parse(localStorage.getItem('agentboard.sessions.backup')!)).toEqual(backup);
+    localStorage.setItem('agentboard.sessions', '{broken again');
+    expect(loadSessions(emptyBoard).sessions[0].board.nodes[0].title).toBe('只存在本机');
+  });
+
+  it('still saves the primary when writing the backup exceeds the storage quota', () => {
+    const data = loadSessions(emptyBoard);
+    const original = localStorage.setItem.bind(localStorage);
+    vi.spyOn(localStorage, 'setItem').mockImplementation((key, value) => {
+      if (key.endsWith('.backup')) throw new DOMException('full', 'QuotaExceededError');
+      original(key, value);
+    });
+    data.sessions[0].draft = '下一步讨论';
+    expect(() => saveSessions(data)).not.toThrow();
+    expect(loadSessions(emptyBoard).sessions[0].draft).toBe('下一步讨论');
+  });
+
+  it('opens a usable board with a visible recovery notice when storage is unavailable', () => {
+    vi.spyOn(localStorage, 'getItem').mockImplementation(() => { throw new DOMException('disabled', 'SecurityError'); });
+    vi.spyOn(localStorage, 'setItem').mockImplementation(() => { throw new DOMException('disabled', 'SecurityError'); });
+    expect(loadSessions(emptyBoard)).toMatchObject({ sessions: [{ board: emptyBoard }], recovery: { source: 'unavailable' } });
+  });
+
+  it('falls back to an existing session when the stored active id is stale', () => {
+    localStorage.setItem('agentboard.sessions', JSON.stringify({ sessions: [{ id: 's', title: '本地内容', board: boardWithOneNode(), createdAt: 1, updatedAt: 1 }], activeId: 'deleted' }));
+    expect(loadSessions(emptyBoard).activeId).toBe('s');
   });
 
   it('keeps existing history isolated in browser localStorage only', () => {

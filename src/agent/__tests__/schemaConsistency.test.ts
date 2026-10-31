@@ -18,6 +18,12 @@ import { buildSystemPrompt } from '../prompts';
 describe('DSL schema ↔ system prompt consistency', () => {
   const prompt = buildSystemPrompt();
 
+  it('describes executable action fields and keeps actual questions in interaction requests', () => {
+    for (const field of ['actions', 'id', 'label', 'prompt', 'nodeIds']) expect(prompt).toContain(`"${field}"`);
+    expect(prompt).toContain('separate actions');
+    expect(prompt).toContain('immediately submits');
+  });
+
   it('describes every patch operation type', () => {
     for (const op of PATCH_OP_TYPES) {
       expect(prompt, `system prompt is missing patch op "${op}"`).toContain(op);

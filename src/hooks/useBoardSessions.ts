@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ActivityEntry, BoardDSL, BoardHistory, BoardSession, RunState } from '../types/dsl';
 import { emptyBoard } from '../data/initialBoard';
 import { loadSessions, saveSessions } from '../storage';
@@ -19,6 +19,10 @@ function newSession(board: BoardDSL): BoardSession {
 
 export function useBoardSessions() {
   const [data, setData] = useState(() => loadSessions(emptyBoard));
+  const latest = useRef(data);
+  latest.current = data;
+  const [storageError, setStorageError] = useState<string | null>(null);
+  const draftSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const sessions = data.sessions;
   const activeId = data.activeId;
@@ -26,11 +30,29 @@ export function useBoardSessions() {
   const recovery = data.recovery;
 
   const persist = useCallback((next: typeof data) => {
+    if (draftSaveTimer.current !== null) { clearTimeout(draftSaveTimer.current); draftSaveTimer.current = null; }
+    latest.current = next;
     setData(next);
-    saveSessions(next);
+    try { saveSessions(next); setStorageError(null); }
+    catch { setStorageError('本地保存失败，可能是浏览器存储已满。本次内容仍在当前页面，请先导出白板。'); }
   }, []);
 
+  useEffect(() => {
+    const flushDraft = () => { if (draftSaveTimer.current !== null) persist(latest.current); };
+    const onVisibilityChange = () => { if (document.visibilityState === 'hidden') flushDraft(); };
+    window.addEventListener('pagehide', flushDraft);
+    window.addEventListener('beforeunload', flushDraft);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      flushDraft();
+      window.removeEventListener('pagehide', flushDraft);
+      window.removeEventListener('beforeunload', flushDraft);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
+  }, [persist]);
+
   const createSession = useCallback(() => {
+    const data = latest.current;
     const freshBoard = JSON.parse(JSON.stringify(emptyBoard)) as BoardDSL;
     // Auto-name with sequential number
     const existing = data.sessions.filter((s) => s.title.startsWith('白板'));
@@ -44,6 +66,7 @@ export function useBoardSessions() {
   }, [data, persist]);
 
   const createSessionFromBoard = useCallback((board: BoardDSL, title?: string) => {
+    const data = latest.current;
     const importedBoard = structuredClone(board);
     if (title?.trim()) importedBoard.board.title = title.trim();
     const session = newSession(importedBoard);
@@ -55,6 +78,7 @@ export function useBoardSessions() {
   }, [data, persist]);
 
   const dismissRecovery = useCallback(() => {
+    const data = latest.current;
     if (!data.recovery) return;
     const { recovery: _recovery, ...next } = data;
     persist(next);
@@ -62,6 +86,7 @@ export function useBoardSessions() {
 
   const switchSession = useCallback(
     (id: string) => {
+      const data = latest.current;
       if (data.sessions.find((s) => s.id === id)) {
         persist({ ...data, activeId: id });
       }
@@ -71,11 +96,13 @@ export function useBoardSessions() {
 
   const renameSession = useCallback(
     (id: string, title: string) => {
+      const data = latest.current;
       const trimmed = title.trim();
       if (!trimmed) return;
       persist({
+        ...data,
         sessions: data.sessions.map((s) =>
-          s.id === id ? { ...s, title: trimmed, updatedAt: Date.now() } : s,
+          s.id === id ? { ...s, title: trimmed, board: { ...s.board, board: { ...s.board.board, title: trimmed } }, updatedAt: Date.now() } : s,
         ),
         activeId: data.activeId,
       });
@@ -85,6 +112,7 @@ export function useBoardSessions() {
 
   const deleteSession = useCallback(
     (id: string) => {
+      const data = latest.current;
       if (data.sessions.length <= 1) return; // keep at least one
       const next = {
         sessions: data.sessions.filter((s) => s.id !== id),
@@ -97,7 +125,9 @@ export function useBoardSessions() {
 
   const updateActiveBoard = useCallback(
     (board: BoardDSL, history?: BoardHistory) => {
+      const data = latest.current;
       persist({
+        ...data,
         sessions: data.sessions.map((s) =>
           s.id === data.activeId ? {
             ...s,
@@ -112,15 +142,11 @@ export function useBoardSessions() {
     [data, persist],
   );
 
-  const resetBoard = useCallback((history?: BoardHistory) => {
-    const fresh = JSON.parse(JSON.stringify(emptyBoard)) as BoardDSL;
-    fresh.board.title = activeSession.title;
-    updateActiveBoard(fresh, history);
-  }, [activeSession?.title, updateActiveBoard]);
-
   const updateActiveAgentState = useCallback(
     (activities: ActivityEntry[], runs: Record<string, RunState>) => {
+      const data = latest.current;
       persist({
+        ...data,
         sessions: data.sessions.map((s) =>
           s.id === data.activeId ? { ...s, activities, runs } : s,
         ),
@@ -130,11 +156,24 @@ export function useBoardSessions() {
     [data, persist],
   );
 
+  const updateActiveDraft = useCallback((value: string | ((current: string) => string)) => {
+    const data = latest.current;
+    const next = { ...data, sessions: data.sessions.map(session => session.id === data.activeId
+      ? { ...session, draft: typeof value === 'function' ? value(session.draft ?? '') : value }
+      : session) };
+    latest.current = next;
+    setData(next);
+    // Avoid serializing every board and its undo history on each keystroke.
+    if (draftSaveTimer.current !== null) clearTimeout(draftSaveTimer.current);
+    draftSaveTimer.current = setTimeout(() => persist(latest.current), 300);
+  }, [persist]);
+
   return {
     sessions,
     activeId,
     activeSession,
     recovery,
+    storageError,
     createSession,
     createSessionFromBoard,
     dismissRecovery,
@@ -143,6 +182,6 @@ export function useBoardSessions() {
     deleteSession,
     updateActiveBoard,
     updateActiveAgentState,
-    resetBoard,
+    updateActiveDraft,
   };
 }

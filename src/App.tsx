@@ -1,10 +1,15 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { BoardDSL, BoardEditEvent, BoardNode, AgentTaskPolicy } from './types/dsl';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import type { BoardDSL, BoardEditEvent, BoardNode, AgentAction, AgentTaskPolicy, DSLPatch, VisualReference } from './types/dsl';
 import { useBoardSessions } from './hooks/useBoardSessions';
 import { useAgent } from './hooks/useAgent';
 import { useAgentConfig } from './hooks/useAgentConfig';
 import { buildNodeDeepDivePrompt } from './agent/deepDive';
 import { useDrag } from './hooks/useDrag';
+import { useDismissibleLayer } from './hooks/useDismissibleLayer';
+import { useBoardPresentation } from './hooks/useBoardPresentation';
+import CanvasNavigator from './components/CanvasNavigator';
+import { arrangeMeasuredBoard } from './presentation/layout';
+import { canvasReadingSize } from './presentation/viewport';
 import { useCanvasPan } from './hooks/useCanvasPan';
 import { useEdgeCreation } from './hooks/useEdgeCreation';
 import BoardCanvas, { normalizeEdgeLabel } from './components/BoardCanvas';
@@ -12,12 +17,19 @@ import PromptBar from './components/PromptBar';
 import ActivityPanel from './components/ActivityPanel';
 import AgentConfigPanel from './components/AgentConfig';
 import AgentRunOverlay from './components/AgentRunOverlay';
+import RunRecovery from './components/RunRecovery';
+import { friendlyProvider } from './agent/liveProgress';
+import './components/experience.css';
+import './components/canvasExperience.css';
 import InteractionToast from './components/InteractionToast';
 import PatchProposalToast from './components/PatchProposalToast';
 import PatchResultToast from './components/PatchResultToast';
 import CanvasToolbar from './components/CanvasToolbar';
 import ShortcutHelp from './components/ShortcutHelp';
 import StorageRecoveryToast from './components/StorageRecoveryToast';
+import PatchReview from './components/PatchReview';
+import './visuals/visuals.css';
+import './components/composer.css';
 import { defaultTaskPolicy } from './agent/taskPolicy';
 import { fitBoardViewport } from './engine/viewport';
 import { boardExportFilename, createBoardExport, parseBoardImport } from './engine/boardTransfer';
@@ -31,8 +43,6 @@ type EditState = {
 type EdgeEditState = {
   edgeId: string;
 };
-
-const MAX_UNDO_HISTORY = 25;
 
 function makeActivityId() {
   return `activity_${Date.now()}_${Math.random().toString(16).slice(2)}`;
@@ -58,6 +68,7 @@ export default function App() {
     activeId,
     activeSession,
     recovery,
+    storageError,
     createSession,
     createSessionFromBoard,
     dismissRecovery,
@@ -66,26 +77,29 @@ export default function App() {
     deleteSession,
     updateActiveBoard,
     updateActiveAgentState,
-    resetBoard: resetActiveBoard,
+    updateActiveDraft: setInput,
   } = useBoardSessions();
 
   const board = activeSession.board;
 
   // ── Agent config ──
-  const { config, setApiKey, setModel, setProvider, setCliId, setBaseUrl } = useAgentConfig();
+  const { config, setApiKey, setModel, setProvider, setCliId, setBaseUrl, setMaxOutputTokens } = useAgentConfig();
   const isAgentConfigured =
     (config.provider === 'local-cli' && Boolean(config.cliId)) ||
-    (config.provider === 'claude' && Boolean(config.apiKey) && Boolean(config.baseUrl?.trim())) ||
-    (config.provider === 'openai' && Boolean(config.apiKey) && Boolean(config.baseUrl?.trim()));
+    (config.provider === 'claude' && Boolean(config.apiKey)) ||
+    (config.provider === 'openai' && Boolean(config.apiKey));
 
   // ── Transaction history ──
-  const getBoard = useCallback(() => board, [board]);
+  const currentBoardRef = useRef(board);
+  currentBoardRef.current = board;
+  const getBoard = useCallback(() => currentBoardRef.current, []);
   const history = activeSession.history;
 
   const updateBoardWithHistory = useCallback(
     (nextBoard: BoardDSL) => {
       const current = getBoard();
       if (JSON.stringify(current) === JSON.stringify(nextBoard)) return;
+      currentBoardRef.current = nextBoard;
       updateActiveBoard(nextBoard, recordBoardChange(activeSession.history, current));
     },
     [activeSession.history, getBoard, updateActiveBoard],
@@ -98,7 +112,6 @@ export default function App() {
     zoom,
     setViewport,
     zoomAt,
-    resetViewport,
     isSpaceHeld,
     isPanning,
     handleCanvasPointerDown,
@@ -131,10 +144,12 @@ export default function App() {
     setSelectedNodeId(primary);
   }, []);
 
+  const presentationNotifier = useRef<(patch: DSLPatch, before: BoardDSL) => void>(() => {});
   const agentOptions = useMemo(
     () => ({
       getRecentEditEvents,
-      onAgentPatchApplied: clearRecentEditEvents,
+      sessionId: activeId,
+      onAgentPatchApplied: (patch: DSLPatch, before: BoardDSL) => { clearRecentEditEvents(); presentationNotifier.current(patch, before); },
       initialActivities: activeSession.activities ?? [],
       initialRuns: activeSession.runs ?? {},
       onStateChange: updateActiveAgentState,
@@ -142,7 +157,7 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     // intentionally omit activeSession — only used for the initial value; session
     // switches are handled by the resetState effect below.
-    [clearRecentEditEvents, getRecentEditEvents, updateActiveAgentState],
+    [activeId, clearRecentEditEvents, getRecentEditEvents, updateActiveAgentState],
   );
 
   const { boardRef, handleNodePointerDown } = useDrag(
@@ -242,21 +257,28 @@ export default function App() {
   // ── Agent ──
   const {
     isPending,
-    lastPatch,
     pendingPatch,
     appliedPatch,
     activities,
     providerName,
     submitMessage,
+    retryRun,
     resumeRun,
     applyPendingPatch,
     rejectPendingPatch,
     undoAppliedPatch,
     dismissAppliedPatch,
+    reconcilePresentation,
     cancel,
     addActivity,
     resetState: resetAgentState,
   } = useAgent(getBoard, updateBoardWithHistory, config, agentOptions);
+
+  const presentation = useBoardPresentation({
+    sessionId: activeId, getBoard, boardRef, setViewport, reconcile: reconcilePresentation,
+    commit: next => { currentBoardRef.current = next; updateActiveBoard(next); },
+  });
+  presentationNotifier.current = presentation.request;
 
   // Reset in-memory agent state when session switches
   const prevActiveIdRef = useRef(activeId);
@@ -267,7 +289,9 @@ export default function App() {
   }, [activeId, activeSession, resetAgentState]);
 
   // ── UI state ──
-  const [input, setInput] = useState('');
+  const input = activeSession.draft ?? '';
+  const [visualReference, setVisualReference] = useState<VisualReference | null>(null);
+  const [reviewOpen, setReviewOpen] = useState(false);
   const [taskPolicy, setTaskPolicy] = useState<AgentTaskPolicy>(() => defaultTaskPolicy([]));
   const [isActivityOpen, setActivityOpen] = useState(false);
   const [expandedActivityId, setExpandedActivityId] = useState<string | null>(null);
@@ -279,6 +303,14 @@ export default function App() {
   const [showShortcutHelp, setShowShortcutHelp] = useState(false);
   const importInputRef = useRef<HTMLInputElement>(null);
   const [showBoardMenu, setShowBoardMenu] = useState(false);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  useEffect(() => { if (!showBoardMenu) setConfirmDeleteId(null); }, [showBoardMenu]);
+  const boardSelectorRef = useRef<HTMLDivElement>(null);
+  const boardTriggerRef = useRef<HTMLButtonElement>(null);
+  useDismissibleLayer({ open: showBoardMenu, root: boardSelectorRef, onDismiss: () => setShowBoardMenu(false), returnFocus: boardTriggerRef });
+  useLayoutEffect(() => {
+    if (showBoardMenu) boardSelectorRef.current?.querySelector<HTMLElement>('[aria-current="true"]')?.focus({ preventScroll: true });
+  }, [showBoardMenu]);
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState('');
   const canUndo = Boolean(history?.past.length);
@@ -287,11 +319,53 @@ export default function App() {
     () => activities.find((item) => item.kind === 'run_progress' && item.progressStatus === 'running') ?? null,
     [activities],
   );
+  const [dismissedRunId, setDismissedRunId] = useState<string | null>(null);
+  const latestRun = activities.find(item => item.kind === 'run_progress');
+  const recoverableRun = !isPending && latestRun?.id !== dismissedRunId && (latestRun?.progressStatus === 'failed' || latestRun?.progressStatus === 'cancelled') ? latestRun : null;
   const pendingInteractions = useMemo(
     () => activities.filter((item) => item.kind === 'needs_input' && item.interaction && !item.resolvedDecision),
     [activities],
   );
   const pendingInteraction = pendingInteractions[0] ?? null;
+
+  useEffect(() => {
+    setVisualReference(null); setReviewOpen(false);
+    selectNodes([]); setSelectedEdgeId(null); setEditState(null); setEdgeEditState(null);
+    setDeepDiveNodeId(null); setDeepDiveInput(''); setRecentEditEvents([]);
+    visualEditRef.current = null;
+  }, [activeId, selectNodes]);
+  useEffect(() => {
+    if (visualReference && (!board.nodes.some(n => n.id === visualReference.nodeId) || !selectedNodeIds.includes(visualReference.nodeId))) setVisualReference(null);
+  }, [board.nodes, selectedNodeIds, visualReference]);
+
+  function updateVisualState(nodeId: string, state: Record<string, unknown>) {
+    const current = getBoard();
+    const node = current.nodes.find(n => n.id === nodeId);
+    if (!node?.visual || JSON.stringify(node.visual.state ?? {}) === JSON.stringify(state)) return;
+    const next = { ...current, nodes: current.nodes.map(n => n.id === nodeId ? { ...n, visual: { ...node.visual!, state } } : n) };
+    currentBoardRef.current = next;
+    // Coalesce rapid slider changes into one undo transaction.
+    const previous = visualEditRef.current;
+    const coalesce = previous?.nodeId === nodeId && Date.now() - previous.at < 1000;
+    updateActiveBoard(next, coalesce ? activeSession.history : recordBoardChange(activeSession.history, current));
+    visualEditRef.current = { nodeId, at: Date.now() };
+    recordEditEvent({ type: 'node_updated', nodeId, summary: `调整视觉「${node.title}」的交互状态`, details: { visualState: state } });
+  }
+  const visualEditRef = useRef<{ nodeId: string; at: number } | null>(null);
+
+  function referenceVisual(reference: VisualReference) {
+    setVisualReference(reference);
+    selectNodes([reference.nodeId]);
+    setTaskPolicy(current => ({ ...current, scope: 'selection', selectedNodeIds: [reference.nodeId] }));
+    window.setTimeout(() => document.querySelector<HTMLTextAreaElement>('.prompt-bar textarea')?.focus(), 0);
+  }
+
+  function discussVisual(nodeId: string, text: string) {
+    const node = getBoard().nodes.find(n => n.id === nodeId);
+    if (!node) return;
+    referenceVisual({ nodeId, label: node.title });
+    setInput(current => current.trim() ? `${current}\n\n${text}` : text);
+  }
 
   useEffect(() => {
     setTaskPolicy((current) => {
@@ -302,7 +376,7 @@ export default function App() {
       }
       return {
         ...current,
-        selectedNodeIds,
+        scope: 'selection', selectedNodeIds,
       };
     });
   }, [selectedNodeIds]);
@@ -345,6 +419,7 @@ export default function App() {
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       const tag = (event.target as HTMLElement)?.tagName;
+      if (document.querySelector('[aria-modal="true"]')) return;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
       if (editState || editingTitle || edgeEditState) return;
 
@@ -465,7 +540,7 @@ export default function App() {
   function commitInlineEdit(nodeId: string, field: 'title' | 'body', value: string) {
     const trimmed = value.trim();
     const previous = board.nodes.find((node) => node.id === nodeId)?.[field] ?? '';
-    if (trimmed && trimmed !== previous) {
+    if ((field === 'body' || trimmed) && trimmed !== previous) {
       updateNode(nodeId, { [field]: trimmed });
       recordEditEvent({
         type: 'node_updated',
@@ -566,9 +641,24 @@ export default function App() {
   }
 
   function fitBoardToViewport() {
-    const rect = boardRef.current?.getBoundingClientRect();
+    const rect = boardRef.current ? canvasReadingSize(boardRef.current) : null;
     if (!rect) return;
-    setViewport(fitBoardViewport(board, rect.width, rect.height, 72));
+    setViewport(fitBoardViewport(presentation.getMeasuredBoard(), rect.width, rect.height, 32));
+  }
+
+  function organizeBoard() {
+    const next = arrangeMeasuredBoard(getBoard(), presentation.getMeasurements());
+    updateBoardWithHistory(next);
+    requestAnimationFrame(() => presentation.focus());
+  }
+
+  function executeAction(action: AgentAction, sourceIds: string[] = []) {
+    if (isPending) return false;
+    if (!isAgentConfigured) { setShowConfig(true); return false; }
+    const ids = (action.nodeIds?.length ? action.nodeIds : sourceIds).filter(id => getBoard().nodes.some(node => node.id === id));
+    const policy = { ...taskPolicy, scope: ids.length ? 'selection' as const : 'board' as const, selectedNodeIds: ids };
+    void submitMessage(action.prompt, action.label, policy);
+    return true;
   }
 
   function zoomCanvas(factor: number) {
@@ -600,8 +690,16 @@ export default function App() {
     }
   }
 
+  async function openVisualExample() {
+    const response = await fetch('/examples/compound-lab.agentboard.json');
+    if (!response.ok) throw new Error('示例加载失败，请重试。');
+    const imported = parseBoardImport(await response.text());
+    createSessionFromBoard(imported.board, '复利实验室 · 交互示例');
+  }
+
   // ── Board title editing ──
   function startTitleEdit() {
+    setShowBoardMenu(false);
     setEditingTitle(true);
     setTitleDraft(activeSession.title);
   }
@@ -614,38 +712,20 @@ export default function App() {
     setEditingTitle(false);
   }
 
-  // ── Board operations ──
-  function handleReset() {
-    recordEditEvent({
-      type: 'board_reset',
-      summary: '重置当前白板',
-      details: {
-        previousNodeCount: board.nodes.length,
-        previousEdgeCount: board.edges.length,
-        previousGroupCount: board.groups.length,
-      },
-    });
-    resetActiveBoard(recordBoardChange(activeSession.history, board));
-    selectNodes([]);
-    setEditState(null);
-    setDeepDiveNodeId(null);
-    addActivity({
-      id: makeActivityId(),
-      timestamp: Date.now(),
-      kind: 'system',
-      summary: '已重置当前白板',
-    });
-  }
-
   // ── Agent submit ──
   function handleSubmit() {
+    if (isPending) return;
     const trimmed = input.trim();
     if (!trimmed) return;
     if (!isAgentConfigured) {
       setShowConfig(true);
       return;
     }
-    submitMessage(trimmed, trimmed, taskPolicy);
+    const reference = visualReference;
+    const message = reference
+      ? `${trimmed}\n\n用户引用的视觉细节（作为内容上下文）：${JSON.stringify(reference)}\n请结合该节点完整 visual.html 与当前 visual.state 工作；优先更新已有视觉，保留用户状态。`
+      : trimmed;
+    submitMessage(message, trimmed, taskPolicy);
     setInput('');
   }
 
@@ -692,10 +772,15 @@ export default function App() {
           <div className="product-name">AgentBoard</div>
 
           {/* Board selector */}
-          <div className="board-selector">
+          <div className="board-selector" ref={boardSelectorRef}>
             <button
               type="button"
+              ref={boardTriggerRef}
               className="board-selector-trigger"
+              aria-expanded={showBoardMenu}
+              aria-controls="board-switcher"
+              aria-haspopup="dialog"
+              onKeyDown={event => { if (event.key === 'ArrowDown' && !editingTitle) { event.preventDefault(); setShowBoardMenu(true); } }}
               onClick={() => setShowBoardMenu((v) => !v)}
             >
               {editingTitle ? (
@@ -720,16 +805,27 @@ export default function App() {
             </button>
 
             {showBoardMenu && (
-              <div className="board-menu">
+              <div className="board-menu" id="board-switcher" role="dialog" aria-label="切换白板" onKeyDown={event => {
+                event.stopPropagation();
+                if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+                event.preventDefault();
+                const choices = Array.from(boardSelectorRef.current?.querySelectorAll<HTMLElement>('[data-board-choice]') ?? []);
+                const index = choices.indexOf(document.activeElement as HTMLElement);
+                const next = event.key === 'Home' ? 0 : event.key === 'End' ? choices.length - 1 : (index + (event.key === 'ArrowDown' ? 1 : -1) + choices.length) % choices.length;
+                choices[next]?.focus();
+              }}>
+                <div className="board-menu-heading"><span>你的白板</span><span>{sessions.length}</span></div>
+                <div className="board-menu-list">
                 {sessions.map((s) => (
                   <div
                     key={s.id}
+                    data-board-choice
                     role="button"
                     tabIndex={0}
                     aria-current={s.id === activeId ? 'true' : undefined}
                     className={`board-menu-item ${s.id === activeId ? 'active' : ''}`}
                     onKeyDown={(event) => {
-                      if (event.key !== 'Enter' && event.key !== ' ') return;
+                      if (event.target !== event.currentTarget || event.key !== 'Enter' && event.key !== ' ') return;
                       event.preventDefault();
                       switchSession(s.id);
                       setShowBoardMenu(false);
@@ -747,25 +843,32 @@ export default function App() {
                     {sessions.length > 1 && (
                       <button
                         type="button"
-                        className="board-menu-delete"
-                        title="删除白板"
-                        aria-label={`删除白板 ${s.title}`}
+                        className={`board-menu-delete${confirmDeleteId === s.id ? ' confirming' : ''}`}
+                        title={confirmDeleteId === s.id ? `再次点击删除「${s.title}」，此操作无法撤销` : '删除白板'}
+                        aria-label={`${confirmDeleteId === s.id ? '确认删除白板' : '删除白板'} ${s.title}`}
                         onClick={(e) => {
                           e.stopPropagation();
-                          const confirmed = window.confirm(`确定删除白板「${s.title}」吗？这个操作无法撤销。`);
-                          if (!confirmed) return;
+                          if (confirmDeleteId !== s.id) {
+                            setConfirmDeleteId(s.id);
+                            return;
+                          }
+                          setConfirmDeleteId(null);
                           deleteSession(s.id);
                           if (sessions.length <= 2) setShowBoardMenu(false);
+                          else window.requestAnimationFrame(() => {
+                            boardSelectorRef.current?.querySelector<HTMLElement>('[aria-current="true"]')?.focus({ preventScroll: true });
+                          });
                         }}
                       >
-                        ✕
+                        {confirmDeleteId === s.id ? '确认删除' : '✕'}
                       </button>
                     )}
                   </div>
                 ))}
+                </div>
                 <div className="board-menu-transfer">
-                  <button type="button" onClick={() => importInputRef.current?.click()}>导入白板</button>
-                  <button type="button" onClick={exportCurrentBoard}>导出当前白板</button>
+                  <button type="button" onClick={() => { setShowBoardMenu(false); importInputRef.current?.click(); }}>导入白板</button>
+                  <button type="button" onClick={() => { setShowBoardMenu(false); exportCurrentBoard(); }}>导出当前白板</button>
                 </div>
               </div>
             )}
@@ -797,7 +900,7 @@ export default function App() {
 
         <div className="topbar-actions">
           <span className="agent-status-pill" title={`当前 AI: ${providerName}`}>
-            AI · {providerName}
+            AI · {friendlyProvider(providerName)}
           </span>
           <button
             type="button"
@@ -839,8 +942,26 @@ export default function App() {
 
       <main className={workspaceClass}>
         <section className="canvas-panel">
+          <div className="canvas-header">
+          <CanvasToolbar
+            zoom={zoom}
+            hasContent={board.nodes.length > 0}
+            onCreateNode={createNodeAtViewportCenter}
+            onZoomIn={() => zoomCanvas(1.2)}
+            onZoomOut={() => zoomCanvas(1 / 1.2)}
+            onResetView={() => { const rect = boardRef.current?.getBoundingClientRect(); if (rect) zoomAt(1, { x: rect.width / 2, y: rect.height / 2 }); }}
+            onFitContent={fitBoardToViewport}
+            onReadContent={() => presentation.focus(selectedNodeIds)}
+            onOrganize={organizeBoard}
+            onOpenShortcuts={() => setShowShortcutHelp(true)}
+          />
+            {board.nodes.length ? <CanvasNavigator board={board} selectedId={selectedNodeId} onFocus={id => { selectNodes([id]); presentation.focus([id]); }} /> : null}
+          </div>
           <BoardCanvas
             board={board}
+            sessionId={activeId}
+            onNodesMeasured={presentation.onNodesMeasured}
+            isSettling={presentation.isSettling}
             selectedNodeId={selectedNodeId}
             selectedNodeIds={selectedNodeIds}
             selectedEdgeId={selectedEdgeId}
@@ -852,6 +973,7 @@ export default function App() {
             isSpaceHeld={isSpaceHeld}
             isPanning={isPanning}
             isAgentPending={isPending}
+            runningActivity={runningActivity}
             highlightedNodeIds={appliedPatch?.summary.affectedNodeIds ?? []}
             highlightedEdgeIds={appliedPatch?.summary.affectedEdgeIds ?? []}
             isAgentConfigured={isAgentConfigured}
@@ -901,6 +1023,10 @@ export default function App() {
             onCommitEdgeLabel={commitEdgeLabelEdit}
             onCancelEdgeLabel={cancelEdgeLabelEdit}
             onOpenDeepDive={openNodeDeepDive}
+            onVisualStateChange={updateVisualState}
+            onVisualReference={referenceVisual}
+            onVisualAsk={discussVisual}
+            onOpenExample={openVisualExample}
             onCloseDeepDive={closeNodeDeepDive}
             onDeepDiveInputChange={setDeepDiveInput}
             onSubmitDeepDive={handleDeepDiveSubmit}
@@ -917,16 +1043,7 @@ export default function App() {
             }}
           />
 
-          <CanvasToolbar
-            zoom={zoom}
-            hasContent={board.nodes.length > 0}
-            onCreateNode={createNodeAtViewportCenter}
-            onZoomIn={() => zoomCanvas(1.2)}
-            onZoomOut={() => zoomCanvas(1 / 1.2)}
-            onResetView={resetViewport}
-            onFitContent={fitBoardToViewport}
-            onOpenShortcuts={() => setShowShortcutHelp(true)}
-          />
+
 
           {recovery ? (
             <StorageRecoveryToast
@@ -936,21 +1053,23 @@ export default function App() {
             />
           ) : null}
 
-          {runningActivity ? (
+          {storageError ? <div className="storage-warning" role="alert"><span>{storageError}</span><button type="button" onClick={exportCurrentBoard}>导出白板</button></div> : null}
+          <div className="conversation-dock">
+          <PromptBar
+            key={activeId}
+            feedback={runningActivity ? (
             <AgentRunOverlay
               activity={runningActivity}
-              onCancel={cancel}
               onOpenActivity={() => {
                 setActivityOpen(true);
                 setExpandedActivityId(runningActivity.id);
               }}
             />
-          ) : null}
-
-          {pendingPatch ? (
+          ) : pendingPatch ? (
             <PatchProposalToast
               proposal={pendingPatch}
               onApply={applyPendingPatch}
+              onReview={() => setReviewOpen(true)}
               onReject={rejectPendingPatch}
               onOpenActivity={() => {
                 setActivityOpen(true);
@@ -962,6 +1081,8 @@ export default function App() {
               result={appliedPatch}
               onUndo={undoAppliedPatch}
               onDismiss={dismissAppliedPatch}
+              onAction={action => executeAction(action, appliedPatch.summary.affectedNodeIds)}
+              onLocate={() => presentation.focus(appliedPatch.summary.affectedNodeIds)}
               onOpenActivity={() => {
                 setActivityOpen(true);
                 setExpandedActivityId(appliedPatch.activityId);
@@ -978,9 +1099,10 @@ export default function App() {
                 setExpandedActivityId(pendingInteraction.id);
               }}
             />
-          ) : null}
-
-          <PromptBar
+          ) : recoverableRun ? <RunRecovery activity={recoverableRun}
+            onRetry={() => { if (recoverableRun.runId) void retryRun(recoverableRun.runId); }}
+            onDismiss={() => setDismissedRunId(recoverableRun.id)}
+            onOpenActivity={() => { setActivityOpen(true); setExpandedActivityId(recoverableRun.id); }} /> : null}
             input={input}
             onInputChange={setInput}
             onSubmit={handleSubmit}
@@ -990,9 +1112,14 @@ export default function App() {
             isAgentConfigured={isAgentConfigured}
             providerName={providerName}
             selectedNodeIds={selectedNodeIds}
+            referencedNodes={selectedNodeIds.map(id => board.nodes.find(n => n.id === id)).filter((n): n is BoardNode => Boolean(n))}
+            visualReference={visualReference}
+            onClearReference={() => setVisualReference(null)}
+            onClearTargets={() => { setVisualReference(null); selectNodes([]); }}
             taskPolicy={taskPolicy}
             onTaskPolicyChange={setTaskPolicy}
           />
+          </div>
         </section>
 
         {isActivityOpen ? (
@@ -1003,10 +1130,14 @@ export default function App() {
             onRespondToInteraction={(runId, decision, activityId) => {
               resumeRun(runId, decision, activityId);
             }}
+            onAction={action => executeAction(action)}
+            isPending={isPending}
             onClose={() => setActivityOpen(false)}
           />
         ) : null}
       </main>
+      {reviewOpen && pendingPatch ? <PatchReview proposal={pendingPatch} onClose={() => setReviewOpen(false)}
+        onApply={() => { applyPendingPatch(); setReviewOpen(false); }} /> : null}
 
       {showShortcutHelp ? <ShortcutHelp onClose={() => setShowShortcutHelp(false)} /> : null}
 
@@ -1018,6 +1149,7 @@ export default function App() {
           onSetProvider={setProvider}
           onSetCliId={setCliId}
           onSetBaseUrl={setBaseUrl}
+          onSetMaxOutputTokens={setMaxOutputTokens}
           onClose={() => setShowConfig(false)}
         />
       ) : null}

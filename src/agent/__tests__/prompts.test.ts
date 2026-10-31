@@ -96,6 +96,17 @@ describe('buildSystemPrompt', () => {
 });
 
 describe('buildUserMessage', () => {
+  it('preserves the complete selected content even when the key measurement is beyond the summary budget', () => {
+    const board = makeBoard(2);
+    board.nodes[0].body = 'Background details. '.repeat(80) + 'The measured denominator is 320 qualified visitors.';
+    board.nodes[1].body = 'Unrelated details. '.repeat(80) + 'UNRELATED_END';
+    const message = buildUserMessage(board, '检查所选卡片的计算口径', { taskPolicy: {
+      scope: 'selection', selectedNodeIds: ['n0'], allowExistingEdits: true, allowDelete: false, allowFullBoardLayout: false,
+    } });
+    expect(message).toContain('The measured denominator is 320 qualified visitors.');
+    expect(message).not.toContain('UNRELATED_END');
+  });
+
   it('should include the board JSON and user message', () => {
     const board = makeBoard(2);
     const msg = buildUserMessage(board, 'add a risk note', { runId: 'run_test' });
@@ -142,7 +153,7 @@ describe('buildUserMessage', () => {
     expect(msg).toContain('Layout intent preflight');
     expect(msg).toContain('"kind": "flowchart"');
     expect(msg).toContain('"algorithm": "dagre"');
-    expect(msg).toContain('"scope": "all"');
+    expect(msg).toContain('"scope": "changed"');
   });
 
   it('should not treat flow execution commands as layout requests', () => {
@@ -283,43 +294,18 @@ describe('buildUserMessage', () => {
 });
 
 describe('normalizePatchForLayoutIntent', () => {
-  it('should append the recommended layout for explicit flowchart requests', () => {
-    const patch: DSLPatch = {
-      type: 'dsl_patch',
-      summary: 'create flow',
-      ops: [
-        {
-          op: 'add_node',
-          node: {
-            id: 'n_new',
-            type: 'card',
-            x: 100,
-            y: 100,
-            width: 240,
-            height: 120,
-            title: 'Start',
-            body: '',
-          },
-        },
-      ],
-    };
-
-    const normalized = normalizePatchForLayoutIntent(patch, '画一个用户注册流程图');
-
-    expect(normalized.ops).toHaveLength(2);
-    expect(normalized.ops[1]).toEqual({ op: 'layout', algorithm: 'dagre', scope: 'all' });
+  it('preserves a conversational reply instead of manufacturing a layout operation', () => {
+    const patch: DSLPatch = { type: 'dsl_patch', summary: '先讨论方向', ops: [] };
+    expect(normalizePatchForLayoutIntent(patch, '比较三种产品方向，做成可以探索的画布')).toBe(patch);
   });
-
-  it('should replace an unsuitable layout on explicit flowchart requests', () => {
-    const patch: DSLPatch = {
-      type: 'dsl_patch',
-      summary: 'wrong layout',
-      ops: [{ op: 'layout', algorithm: 'mindmap', scope: 'changed' }],
-    };
-
-    const normalized = normalizePatchForLayoutIntent(patch, '把全部节点改成流程图');
-
-    expect(normalized.ops[0]).toEqual({ op: 'layout', algorithm: 'dagre', scope: 'all' });
+  it('preserves model layout choices and never upgrades their scope from request keywords', () => {
+    const patch: DSLPatch = { type: 'dsl_patch', summary: '使用自己的布局', ops: [{ op: 'layout', algorithm: 'mindmap', scope: 'changed' }] };
+    expect(normalizePatchForLayoutIntent(patch, '把全部节点改成流程图')).toBe(patch);
+  });
+  it('does not turn a requested new checklist or quoted future action into a global relayout', () => {
+    const patch: DSLPatch = { type: 'dsl_patch', summary: '新增清单', ops: [{ op: 'add_node', node: { id: 'n', type: 'note', title: '验证清单', body: '', x: 80, y: 80, width: 300, height: 160 } }] };
+    expect(normalizePatchForLayoutIntent(patch, '请创建三个卡片，下一步选项可以是新增一个验证清单。')).toBe(patch);
+    expect(inferLayoutIntent('请新增一个验证清单')?.scope).toBe('changed');
   });
 });
 

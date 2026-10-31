@@ -1,6 +1,7 @@
 import type { AgentAdapter, AgentConfig, AgentError, AgentRequest } from './types';
 import { buildSystemPrompt, buildUserMessage } from './prompts';
 import { fallbackInteractionFromText, parseAgentResponse } from './response';
+import { readApiStream } from './apiStream';
 import { DEFAULT_TIMEOUT_MS, mapAbortError, withTimeout } from './resilience';
 
 const DEFAULT_ANTHROPIC_BASE_URL = 'https://api.anthropic.com/v1';
@@ -48,21 +49,21 @@ export class ClaudeAgentAdapter implements AgentAdapter {
           'anthropic-version': ANTHROPIC_VERSION,
         },
         body: JSON.stringify({
+          stream: true,
           model: this.config.model || 'claude-opus-4-20250514',
-          max_tokens: 4096,
-          temperature: 0,
+          max_tokens: this.config.maxOutputTokens || 16384,
           system: systemPrompt,
           messages: [{ role: 'user', content: userMessage }],
         }),
         signal,
       });
     } catch {
-      throw mapAbortError(signal, '网络请求失败，请检查网络连接后重试。');
-    } finally {
       cleanup();
+      throw mapAbortError(signal, '网络请求失败，请检查网络连接后重试。');
     }
 
     if (!response.ok) {
+      cleanup();
       const status = response.status;
       if (status === 401 || status === 403) {
         throw {
@@ -88,22 +89,25 @@ export class ClaudeAgentAdapter implements AgentAdapter {
       } satisfies AgentError;
     }
 
+    request.onProgress?.({ type: 'connected', message: '已连接模型服务' });
     let text: string;
     try {
-      const body = await response.json();
-      // Anthropic Messages API returns content blocks
-      const content = body?.content;
-      if (Array.isArray(content) && content.length > 0 && content[0]?.type === 'text') {
-        text = content[0].text;
+      if (response.headers?.get('content-type')?.includes('text/event-stream')) {
+        text = await readApiStream(response, 'claude', signal, request.onProgress);
       } else {
-        throw new Error('Unexpected response structure from Anthropic API');
+        const body = await response.json();
+        text = Array.isArray(body?.content) ? body.content.filter((part: { type: string; text?: string }) => part.type === 'text' && typeof part.text === 'string').map((part: { text: string }) => part.text).join('\n') : '';
+        if (!text) throw new Error('服务没有返回可展示的内容');
       }
     } catch (err) {
+      if (signal.aborted) throw mapAbortError(signal, '生成已中断');
       throw {
         code: 'PARSE_ERROR',
-        message: '无法解析 API 响应结构。',
+        message: err instanceof Error ? err.message : '无法解析 API 响应结构。',
         rawText: String(err),
       } satisfies AgentError;
+    } finally {
+      cleanup();
     }
 
     try {

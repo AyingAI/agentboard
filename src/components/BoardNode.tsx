@@ -1,4 +1,5 @@
-import type { BoardNode as BoardNodeType } from '../types/dsl';
+import type { BoardNode as BoardNodeType, VisualReference } from '../types/dsl';
+import VisualSurface from './VisualSurface';
 
 interface EditState {
   nodeId: string;
@@ -17,6 +18,9 @@ interface BoardNodeProps {
   onCancelEdit: () => void;
   onConnectStart: (nodeId: string, side: 'top' | 'right' | 'bottom' | 'left') => void;
   onOpenDeepDive: (nodeId: string) => void;
+  onVisualStateChange: (nodeId: string, state: Record<string, unknown>) => void;
+  onVisualReference: (reference: VisualReference) => void;
+  onVisualAsk: (nodeId: string, text: string) => void;
 }
 
 const TAG_LABELS: Record<string, string> = {
@@ -57,6 +61,9 @@ export default function BoardNode({
   onCancelEdit,
   onConnectStart,
   onOpenDeepDive,
+  onVisualStateChange,
+  onVisualReference,
+  onVisualAsk,
 }: BoardNodeProps) {
   const isEditing = editState?.nodeId === node.id;
   const editingField = editState?.field;
@@ -72,7 +79,7 @@ export default function BoardNode({
 
   return (
     <article
-      className={`board-node ${node.type} ${tagClasses} ${isSelected ? 'selected' : ''} ${isPrimarySelected ? 'primary-selected' : ''} ${isAgentChanged ? 'agent-changed' : ''}`}
+      className={`board-node ${node.type} ${node.visual ? 'visual-node' : ''} ${tagClasses} ${isSelected ? 'selected' : ''} ${isPrimarySelected ? 'primary-selected' : ''} ${isAgentChanged ? 'agent-changed' : ''}`}
       data-node-id={node.id}
       style={{
         left: node.x,
@@ -142,6 +149,9 @@ export default function BoardNode({
           {node.body}
         </p>
       )}
+
+      {node.visual ? <VisualSurface nodeId={node.id} title={node.title} visual={node.visual}
+        onStateChange={onVisualStateChange} onReference={onVisualReference} onAsk={onVisualAsk} /> : null}
 
       {/* Connection handles — drag from any side to another node to create an edge */}
       {isPrimarySelected && (

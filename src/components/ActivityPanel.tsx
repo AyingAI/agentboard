@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
-import type { ActivityEntry, ActivityProgressStep } from '../types/dsl';
+import type { ActivityEntry, ActivityProgressStep, AgentAction } from '../types/dsl';
 import type { InteractionDecision } from '../hooks/useAgent';
+import { followUpActions } from '../agent/followUpActions';
+import { friendlyProvider, runPresentation } from '../agent/liveProgress';
 import { activitiesForView, viewForActivity, type ActivityView } from '../agent/activityViews';
 
 const KIND_LABEL: Record<ActivityEntry['kind'], string> = {
@@ -28,6 +30,8 @@ function formatElapsed(ms: number) {
 
 interface ActivityPanelProps {
   onClose: () => void;
+  onAction: (action: AgentAction) => void;
+  isPending: boolean;
   activities: ActivityEntry[];
   expandedId: string | null;
   onToggleExpand: (id: string | null) => void;
@@ -36,6 +40,8 @@ interface ActivityPanelProps {
 
 export default function ActivityPanel({
   onClose,
+  onAction,
+  isPending,
   activities,
   expandedId,
   onToggleExpand,
@@ -46,6 +52,7 @@ export default function ActivityPanel({
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [copyFailedId, setCopyFailedId] = useState<string | null>(null);
   const [now, setNow] = useState(Date.now());
+  const hasRunning = activities.some(item => item.kind === 'run_progress' && item.progressStatus === 'running');
   const visibleActivities = activitiesForView(activities, view);
   const collaborationCount = activitiesForView(activities, 'collaboration').length;
   const diagnosticCount = activitiesForView(activities, 'diagnostics').length;
@@ -57,13 +64,10 @@ export default function ActivityPanel({
   }, [activities, expandedId]);
 
   useEffect(() => {
-    const hasRunning = activities.some((item) =>
-      item.kind === 'run_progress' && item.progressStatus === 'running',
-    );
     if (!hasRunning) return;
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
-  }, [activities]);
+  }, [hasRunning]);
 
   function respond(item: ActivityEntry, decision: InteractionDecision) {
     if (!item.interaction || item.resolvedDecision) return;
@@ -92,7 +96,7 @@ export default function ActivityPanel({
           <h1>Agent 历史</h1>
           <p>{view === 'collaboration' ? '需求、确认和白板变更' : '调用、校验和错误详情'}</p>
         </div>
-        <button type="button" className="ghost small" onClick={onClose} title="关闭活动面板">
+        <button type="button" className="ghost small" onClick={onClose} title="关闭活动面板" aria-label="关闭活动面板">
           ✕
         </button>
       </div>
@@ -141,7 +145,7 @@ export default function ActivityPanel({
                 title={isExpanded ? '收起详情' : '展开详情'}
               >
                 <span className="activity-kind">{KIND_LABEL[item.kind]}</span>
-                <span className="activity-text">{item.summary}</span>
+                <span className="activity-text">{item.kind === 'run_progress' && item.live ? `${friendlyProvider(item.live.provider)} · ${item.progressStatus === 'running' ? runPresentation(item, now).title : item.progressStatus === 'completed' ? '已完成' : item.progressStatus === 'cancelled' ? '已停止' : '未完成'}` : item.summary}</span>
                 {item.kind === 'run_progress' && elapsed ? (
                   <span className={`activity-runtime ${item.progressStatus ?? ''}`}>{elapsed}</span>
                 ) : null}
@@ -152,7 +156,7 @@ export default function ActivityPanel({
                   <span className={`activity-chevron ${isExpanded ? 'open' : ''}`}>▾</span>
                 ) : null}
               </button>
-              {item.kind === 'run_progress' && item.progressSteps?.length ? (
+              {isExpanded && item.kind === 'run_progress' && item.progressSteps?.length ? (
                 <div className={`progress-card ${item.progressStatus ?? 'running'}`}>
                   <div className="progress-steps">
                     {item.progressSteps.map((step) => (
@@ -163,7 +167,9 @@ export default function ActivityPanel({
                       </div>
                     ))}
                   </div>
-                  {isExpanded && item.detail ? (
+                  {item.live?.events.length ? <ol className="run-event-timeline" aria-label="实际执行活动">{item.live.events.map((event, index) => <li key={index}><time>{new Date(event.timestamp).toLocaleTimeString('zh-CN', { hour12: false })}</time><span>{event.label}</span></li>)}</ol> : null}
+                  {item.live ? <p className="run-log-metrics">已接收 {item.live.outputChars.toLocaleString()} 字符 · {item.live.toolCount} 次工具活动</p> : null}
+                  {item.detail && (!item.live || item.progressStatus === 'failed') ? (
                     <pre className="progress-detail">{item.detail}</pre>
                   ) : null}
                 </div>
@@ -230,6 +236,7 @@ export default function ActivityPanel({
               ) : isExpanded && item.detail ? (
                 <pre className="activity-detail">{item.detail}</pre>
               ) : null}
+              {isExpanded && item.kind === 'agent_patch' ? <div className="activity-next-actions">{followUpActions({ actions: item.actions, questions: item.suggestions }).map((action, index) => <button type="button" key={`${action.id}-${index}`} disabled={isPending} onClick={() => onAction(action)}>{action.label} <span aria-hidden="true">↗</span></button>)}</div> : null}
             </section>
           );
         })}

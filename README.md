@@ -1,216 +1,174 @@
 # AgentBoard
 
-**Agent-native structured canvas** — 一个 local-first 的结构化白板，让人和 AI Agent 围绕同一份白板状态协作。
+**让人和 AI Agent 围绕同一张可编辑画布持续协作。**
 
-[English README](./README.en.md)
+AgentBoard 是一个 local-first 的结构化白板。用自然语言整理想法、解释系统、比较方案；直接修改卡片、操作交互视觉，再让 Agent 基于当前内容继续完善。
 
-![status](https://img.shields.io/badge/status-prototype-blue)
-![license](https://img.shields.io/badge/license-MIT-green)
+[English](./README.en.md) · [v0.3.5 更新记录](./CHANGELOG.md) · [贡献指南](./CONTRIBUTING.md)
 
 ![AgentBoard cover](./assets/agentboard-cover.png)
 
-AgentBoard 把和 Agent 的对话变成一张可编辑画布。用户可以让 Agent 拆解产品、梳理 workflow、画架构图或决策树；Agent 返回结构化白板操作；用户再移动卡片、编辑文字、创建连线，并基于更新后的白板继续对话。
-
-## 它能做什么
-
-- 用自然语言创建可编辑的卡片、便签、分组和连线。
-- 在发送前明确 Agent 的作用范围和权限：整张白板或选中节点，以及是否允许改写、删除和全图布局。
-- 对新增等低风险变更自动应用；删除、内容改写和全图布局等高风险变更先展示提案，确认后才落板。
-- 在 Agent 完成后汇总并高亮受影响对象，支持一键撤销、持久化撤销/重做历史。
-- 白板以结构化 `BoardDSL` 存储，而不是一张扁平图片。
-- Agent 输出通过经过校验的 `DSLPatch` 操作应用到白板，超出授权范围的操作会被确定性拦截。
-- Agent 可以读取最近的人类编辑增量，不必每次都读取完整白板。
-- 通过 Vite 开发服务器桥接本地 CLI Agent，例如 Claude Code、OpenCode、Pi CLI、Codex CLI、Gemini CLI、Antigravity、Qwen Code、Cursor Agent、GitHub Copilot CLI、Qoder、Kimi 和 Trae。
-- 支持 Claude API 和 OpenAI 兼容 API。
-- 白板 session、操作历史和 Agent 设置保存在本机浏览器 `localStorage`，并支持白板导入、导出与本地备份恢复。
-
-## 为什么需要它
-
-很多 Agent 产品会把上下文丢在冗长聊天记录里。AgentBoard 用画布本身作为共享的外部记忆：
-
-```txt
-人的意图
-  -> Agent 规划结构化白板变更
-  -> AgentBoard 校验并应用 DSLPatch
-  -> 人编辑可见画布
-  -> Agent 读取更新后的结构和最近编辑
-```
-
-关键不是“AI 画了一张图”，而是人和 Agent 一直在操作同一个结构化对象。
-
-## 核心协作体验
-
-AgentBoard 把一次 Agent 调用设计成可理解、可授权、可恢复的协作事务：
-
-1. **选择起点**：空白白板会检测本地 CLI，并提供产品拆解、技术架构和执行计划三个起始任务。
-2. **限定范围**：发送前可指定作用于整张白板或选中节点，并分别控制改写、删除和全图布局权限。
-3. **观察执行**：运行中展示读取上下文、调用 Agent、校验输出和应用结果四个阶段，也可以随时停止。
-4. **审阅风险**：低风险新增可直接应用；高风险修改必须先查看摘要并确认，白板不会被静默覆盖。
-5. **继续共创**：完成后会高亮变化并提供撤销；人工移动、改字或连线后，Agent 可读取这些增量继续完善。
-
-右侧“历史”分为两个视图：
-
-- **协作记录**：用户指令、Agent 修改、确认请求和可恢复操作。
-- **运行日志**：CLI 调用、重试、结构校验和错误详情。
-
 ## 快速开始
+
+需要 Node.js 20.19+ 或 22.12+，建议使用 Node.js 22 或更新版本。
 
 ```bash
 git clone https://github.com/AyingAI/agentboard.git
 cd agentboard
-npm install
-npm run dev
+npm ci
+npm run dev -- --host 127.0.0.1
 ```
 
-打开 `http://localhost:5173`。
+打开终端显示的本地地址，默认是 `http://127.0.0.1:5173`。
 
-然后在设置面板选择 Agent 提供方：
+- **先体验**：空白画布点击“先体验一个交互示例”，无需配置 Agent 即可操作内置复利实验室。示例是预生成内容，不会发起模型调用。
+- **连接 Agent**：打开右上角设置，选择本机已安装并完成认证的 CLI，或配置 Claude / OpenAI 兼容 API。
+- **开始共创**：选择起始任务，或点击底部输入条描述需求；选中已有内容后，可以围绕它继续讨论。
 
-- **Local CLI**：自动检测受支持的本地 CLI，例如 Claude Code、OpenCode、Pi CLI、Codex CLI、Gemini CLI、Antigravity、Qwen Code、Cursor Agent、GitHub Copilot CLI、Qoder、Kimi 和 Trae。
-- **Claude API**：使用 Anthropic API key。
-- **OpenAI-compatible API**：使用 OpenAI 或兼容的 base URL。
+## v0.3.5 的主要变化
 
-推荐优先使用 **Local CLI**。它会复用你本机已经配置好的 Agent 工具，通常能获得更完整的 Agent 体验：可以使用本地 CLI 自带的搜索、文件读写、命令执行和 skill 能力，而不只是让模型生成一段文本。
+- **更大的画布**：输入框默认收起为居中的悬浮小条，点击展开，空内容离开后收起；两侧仍可操作画布。生成中可停止，也可先写下一步草稿。
+- **可以操作的内容**：模型能在卡片中生成 HTML、SVG、JavaScript 图解、解释器和原型；参数和交互状态自动保存在当前白板。
+- **连续协作**：每张白板分别保存草稿、运行记录和待确认修改；刷新、切换白板后可以继续。Agent 的下一步建议可以一键执行，保留未发送草稿。
+- **可审阅的修改**：新增等低风险操作直接应用；改写内容、删除节点/连线/分组、全图布局先确认。可以预览前后版本，旧提案不能覆盖后续人工修改。
+- **可读的大画布**：按实际渲染尺寸避让卡片和分组；提供阅读视图、总览、内容导航和滚动浏览。
+- **更顺畅的白板管理**：标题下拉菜单支持切换、导入、导出；删除按钮会原位变为“确认删除”，再次点击执行，关闭菜单则取消。
 
-Claude API 和 OpenAI-compatible API 适合轻量使用，例如快速整理白板、生成结构化节点或在没有本地 CLI 的环境下试用。当前 API 模式主要负责文本推理和结构化输出，不会自动拥有本地 CLI 的工具能力。
+完整变更见 [CHANGELOG](./CHANGELOG.md)。
 
-API key 只保存在浏览器 `localStorage`。不要把 secrets 提交到仓库。
+## 一次典型的协作
 
-首次打开空白白板时，可以直接使用检测到的本地 CLI，也可以先选择一个起始任务补充后发送。画布左上角提供创建卡片、缩放、适应内容和快捷键帮助。
+1. 输入“比较三种产品方向，帮我找出假设和验证方法”，让 Agent 选择合适的表达。
+2. 直接移动卡片、编辑文字或操作视觉中的参数。
+3. 选中相关卡片，继续提问；视觉也支持“引用细节”和“与 Agent 讨论”。
+4. 在修改提案中查看前后变化，再决定采纳或放弃。
+5. 点击可执行的下一步建议，或写下自己的下一步；需要时撤销、导出备份。
 
-## 画布基础操作
+这条流程适合梳理想法、解释机制、设计实验和交互推演。调研与业务结论仍需要真实来源和实测数据；示例参数、假设和模拟结果不能当作验证结果。
 
-| 操作 | 交互 |
+## 连接 Agent
+
+| 方式 | 适合的场景 | 配置 |
+| --- | --- | --- |
+| Local CLI | 使用本机 Agent 的认证、工具与 skills | 安装并登录 CLI，在设置中选择它 |
+| Claude API | 通过 API 进行推理和结构化输出 | API key、模型及可选 API 地址 |
+| OpenAI-compatible API | OpenAI 或兼容服务 | API key、base URL、模型和输出预算 |
+
+支持检测 Claude Code、OpenCode、Pi、Codex、Gemini、Antigravity、Qwen Code、Cursor Agent、GitHub Copilot CLI、Qoder、Kimi 和 Trae。设置会显示检测到的版本与实际可执行路径；安装或升级后点击“重新检测”。
+
+CLI 模式复用本机已有能力；API 模式不会自动获得文件、命令或搜索工具。API 请求从浏览器直接发出，服务端需要允许相应的跨域请求。API key 和设置保存在浏览器 `localStorage`，不会写入仓库。
+
+**本地 CLI bridge 仅在 Vite 开发服务器中可用。** `npm run build` 的产物和 `npm run preview` 不包含 CLI 后端。开发服务器可以启动本地 CLI，应保持仅本机访问。
+
+## 操作速查
+
+| 操作 | 方法 |
 | --- | --- |
-| 创建卡片 | 点击左上角“+ 卡片”，或双击画布空白处 |
+| 输入与发送 | 点击底部输入条；Enter 发送，Shift + Enter 换行 |
+| 创建卡片 | 左上角“+ 卡片”，或双击画布空白处 |
+| 编辑文字 | 双击卡片标题或正文 |
 | 移动卡片 | 拖拽；框选后可批量移动 |
-| 编辑卡片文字 | 双击标题或正文 |
-| 创建连线 | 选中节点，拖拽连接点到另一个节点 |
+| 创建连线 | 选中节点，从连接点拖到另一个节点 |
 | 编辑连线标签 | 选中或双击连线标签 |
-| 删除选中内容 | Delete 或 Backspace |
+| 删除选中内容 | Delete / Backspace |
+| 浏览与缩放 | 滚轮浏览；Cmd/Ctrl + 滚轮缩放 |
 | 平移画布 | Space + 拖拽，或鼠标中键拖拽 |
-| 缩放画布 | 左上角缩放按钮，或 `Cmd/Ctrl + 滚轮` |
-| 适应全部内容 | 点击左上角“适应内容” |
-| 撤销 / 重做 | `Cmd/Ctrl + Z` / `Cmd/Ctrl + Shift + Z`（Windows 也支持 `Ctrl + Y`） |
-| 查看快捷键 | 点击左上角 `?`，或直接按 `?` |
+| 阅读 / 总览 | 使用左上角“阅读”“总览”，或通过内容导航跳转 |
+| 撤销 / 重做 | Cmd/Ctrl + Z / Cmd/Ctrl + Shift + Z；Windows 也支持 Ctrl + Y |
+| 查看快捷键 | 点击“?”或按 ? |
+| 白板管理 | 点击顶部标题打开菜单；双击标题重命名 |
 
-## 核心协议
+## 保存、恢复与备份
 
-AgentBoard 围绕一个很小的白板协议构建。
+- 白板、草稿、运行记录、交互状态和待确认修改保存在当前浏览器。
+- 每张白板保存最多 25 步撤销/重做历史；刷新或切换白板后仍可使用。
+- 白板菜单可导出 `.agentboard.json`，也可导入该格式或原始 `BoardDSL`。导入会先校验，再作为新白板打开。
+- 保存时尝试保留上一份本地副本；主数据缺失或损坏时尝试恢复备份并提示用户。存储不可用或已满时显示导出入口。
+- 白板导出包含画布和视觉状态，不包含 Agent 密钥、聊天草稿及完整运行历史。
+- 删除白板不可撤销，至少保留一张白板；重要内容请先导出。清除浏览器数据会清除本地工作，不支持云同步或跨设备自动恢复。
 
-### `BoardDSL`
+## 协议与视觉运行时
 
-`BoardDSL` 是可见白板的事实来源：
-
-```ts
-type BoardDSL = {
-  version: string;
-  board: { id: string; title: string; viewport: { x: number; y: number; zoom: number } };
-  nodes: BoardNode[];
-  edges: BoardEdge[];
-  groups: BoardGroup[];
-  metadata: Record<string, unknown>;
-};
-```
-
-### `DSLPatch`
-
-Agent 不直接修改白板。它返回一个 patch：
+`src/types/dsl.ts` 是共享协议的来源。Agent 返回经过校验的 `DSLPatch`，而不是直接修改画布；需要用户回答或授权时返回 `interaction_request`。
 
 ```ts
 type DSLPatch = {
   type: 'dsl_patch';
   summary: string;
   ops: PatchOp[];
-  questions?: string[];
+  actions?: { id: string; label: string; prompt: string; nodeIds?: string[] }[];
+  questions?: string[]; // 兼容旧版建议
 };
 ```
 
-支持的操作包括 `add_node`、`update_node`、`delete_node`、`add_edge`、`delete_edge`、`add_group`、`update_group`、`delete_group` 和 `layout`。
+支持卡片、便签、分组、连线的增删改和布局操作。无效引用、重复 ID、无效几何或超出授权范围会使整批修改失败，不会留下半更新状态。近期对话和人工编辑会作为后续上下文，所选节点会保留完整正文。
 
-每个 patch 都会先校验再应用。无效引用、重复 ID、无效几何信息、schema 不匹配或超出用户授权范围，都会让 patch 原子失败，不会留下半更新状态。删除节点或分组、改写现有内容、全图布局等高风险操作还需要用户明确确认。
+卡片可附带开放式视觉内容：
 
-### 本地数据与恢复
-
-- 每张白板独立保存最多 25 步撤销和重做历史，刷新或切换白板后仍然可用。
-- 白板菜单支持导出版本化 `.agentboard.json`，也可以导入该格式或原始 `BoardDSL` JSON。
-- 导入文件会先经过结构与引用校验，并作为新白板打开，不覆盖现有工作。
-- 每次保存会保留上一份本地 session 数据；主存储损坏时会尝试恢复备份并明确提示用户导出。
-
-### 增量上下文包
-
-当用户编辑白板后再次调用 Agent，AgentBoard 默认发送紧凑的增量上下文：
-
-- 已变化的编辑事件
-- 已变化的节点 ID 和连线 ID
-- 已变化节点的完整对象
-- 与变化节点相关的连线
-- 附近节点的轻量摘要
-- 紧凑的白板摘要
-
-全局任务，例如整图整理、导出或流程执行，仍然会接收完整白板上下文。
-
-## 架构
-
-```txt
-React app
-  ├── BoardDSL state
-  ├── patch engine
-  ├── validation engine
-  ├── canvas renderer
-  └── agent adapters
-        ├── local CLI bridge
-        ├── Claude API
-        └── OpenAI-compatible API
+```ts
+visual: {
+  html: string;
+  state?: Record<string, unknown>;
+  height?: number;
+}
 ```
 
-项目结构：
+视觉在隔离 iframe 中运行，常用接口如下：
 
-```txt
-src/
-  types/dsl.ts           # 协议和共享类型
-  engine/                # patch 应用和校验
-  agent/                 # 适配器、prompt、解析、韧性处理
-  hooks/                 # React 状态、拖拽、平移、session
-  components/            # 画布和 UI 组件
-  data/                  # 初始白板模板
-  storage.ts             # localStorage 持久化
-agentBridgePlugin.ts     # 用于本地 CLI 执行的 Vite middleware
+```js
+const saved = agentboard.getState();
+agentboard.setState({ years: 12 });
+const unsubscribe = agentboard.onStateChange(state => render(state));
+agentboard.ask('根据我的参数继续分析', { selectedOption: 'A' });
+agentboard.reference('这个结果', 'result-element-id');
 ```
 
-## 开发
+`ask()` 只起草请求，由用户在宿主输入框发送；宿主的下一步建议按钮才会直接发起一次 Agent 调用。带稳定 `id` 或 `name` 的原生控件会自动保存到 `state._inputs`。更新 `visual.html` 时省略 `state` 即保留已有状态。
+
+支持内联脚本及 jsDelivr、cdnjs、esm.sh、unpkg 的脚本库。视觉不能访问宿主存储、任意网络请求、远程图片、嵌套 iframe 或顶层导航。最终视觉在完整响应校验后应用；运行中展示真实活动、内容线索和接收字符数，不估算虚假进度。
+
+## 开发与测试
 
 ```bash
-npm run dev        # 启动 Vite 开发服务器
+npm run dev        # 本地开发，包含 CLI bridge
 npm run typecheck  # TypeScript 校验
-npm run test       # Vitest 测试
-npm run build      # 生产构建
+npm run test       # 单元测试
+npm run test:e2e   # 隔离浏览器回归，不调用真实模型
+npm run build      # 生成 dist/ 静态产物
+npm run preview    # 预览静态产物，不含 CLI bridge
 ```
 
-## 当前状态
+浏览器测试在 macOS 使用已安装的 Chrome，其他平台使用 Playwright Chromium，必要时先运行 `npx playwright install chromium`。
 
-AgentBoard 仍是原型。它适合用于实验结构化 Agent 协作，但还不是一个托管式多人产品。
-
-当前边界：
-
-- 仅支持 local-first 存储，但可通过 `.agentboard.json` 手动备份和迁移。
-- 没有服务端账号、权限、多人协作或云同步模型。
-- 本地 CLI bridge 只在 Vite 开发服务器中运行。
-- API key 仍保存在浏览器 `localStorage`；共享设备上请谨慎使用。
-- 外部副作用应保持显式，并由用户授权。
-
-## 贡献
-
-欢迎提交 issue 和 pull request。提交变更前请运行：
+真实 CLI 测试需要显式开启，会使用已安装 CLI 的认证与模型配额：
 
 ```bash
-npm run typecheck
-npm run test
-npm run build
+AGENTBOARD_LIVE_CLI=codex npm run test:e2e -- e2e/live-agent.spec.ts --workers=1
+AGENTBOARD_LIVE_ACTIONS=pi npm run test:e2e -- e2e/live-actions.spec.ts --workers=1
 ```
 
-贡献指南见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+测试截图、trace、生成白板、构建产物和本地运行记录均不提交到 GitHub。有效回归测试保留在 `src/**/__tests__`、`src/**/*.test.ts` 和 `e2e/`。
+
+```text
+src/
+  types/          # 白板、Agent 与 session 协议
+  engine/         # patch 应用、校验和事务历史
+  agent/          # 适配器、上下文、流式响应与风险评估
+  server/         # CLI 目录、发现与事件解析
+  presentation/   # 实测尺寸与布局避让
+  visuals/        # 视觉协议与隔离运行时
+  hooks/          # React 状态和交互
+  components/     # 画布、输入框、设置和审阅界面
+  storage.ts      # 本地保存与恢复
+agentBridgePlugin.ts # Vite CLI 中间件
+```
+
+## 当前边界
+
+AgentBoard 仍是面向本机使用的原型，没有账号系统、托管服务、多人协作或云同步。模型输出的内容质量取决于所用模型和可用证据；所有 CLI 和第三方 API 的版本组合并未逐一验证。
+
+问题反馈与贡献见 [CONTRIBUTING.md](./CONTRIBUTING.md)，本地桥接与密钥注意事项见 [SECURITY.md](./SECURITY.md)。
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+[MIT](./LICENSE)

@@ -1,207 +1,176 @@
 # AgentBoard
 
-**Agent-native structured canvas** — a local-first whiteboard where humans and AI agents collaborate on the same structured board state.
+**A shared, editable canvas for ongoing collaboration with an AI agent.**
 
-[中文说明](./README.md)
+AgentBoard is a local-first structured whiteboard. Describe an idea, understand a system or compare options; edit the cards, interact with a visual, then ask an agent to continue from the current state.
 
-![status](https://img.shields.io/badge/status-prototype-blue)
-![license](https://img.shields.io/badge/license-MIT-green)
+[中文](./README.md) · [v0.3.5 changelog](./CHANGELOG.md) · [Contributing](./CONTRIBUTING.md)
 
-AgentBoard turns a conversation with an agent into an editable canvas. The user can ask for a product breakdown, workflow, architecture map, or decision tree; the agent responds with structured board operations; the user can then move cards, edit text, create connections, and continue the conversation from the updated board.
+![AgentBoard cover](./assets/agentboard-cover.png)
 
-## What It Does
+## Quick start
 
-- Creates editable cards, notes, groups, and edges from natural language.
-- Makes agent scope and permissions explicit before a run: whole board or selected nodes, plus separate controls for rewrites, deletion, and full-board layout.
-- Auto-applies low-risk additions while requiring review for destructive or broad changes.
-- Summarizes and highlights affected objects after each run, with one-click undo and persistent undo/redo history.
-- Stores the board as a structured `BoardDSL`, not as a flat image.
-- Applies agent output through validated `DSLPatch` operations and deterministically rejects operations outside the user's authorization.
-- Lets agents read recent human edits through a delta-first context packet instead of always receiving the full board.
-- Supports local CLI agents such as Claude Code, OpenCode, Pi CLI, Codex CLI, Gemini CLI, Antigravity, Qwen Code, Cursor Agent, GitHub Copilot CLI, Qoder, Kimi, and Trae through a Vite dev-server bridge.
-- Supports Claude API and OpenAI-compatible APIs.
-- Persists sessions, board history, and agent settings locally, with board import/export and local backup recovery.
-
-## Why It Exists
-
-Most agent products lose context in a long chat transcript. AgentBoard uses the canvas itself as shared external memory:
-
-```txt
-Human intent
-  -> agent plans structured board changes
-  -> AgentBoard validates and applies a DSLPatch
-  -> human edits the visible canvas
-  -> agent reads the updated structure and recent edits
-```
-
-The important part is not "AI draws a diagram"; it is that both the human and the agent keep working on the same structured object.
-
-## Collaboration Loop
-
-AgentBoard treats each agent run as an understandable, authorized, and recoverable transaction:
-
-1. Start from an auto-detected local CLI or a product, architecture, or delivery starter task.
-2. Choose whole-board or selected-node scope and grant only the required edit permissions.
-3. Follow visible context, agent-call, validation, and apply stages; cancel at any time.
-4. Review high-risk proposals before they touch the board; low-risk additions can stay fast.
-5. Inspect highlighted changes, undo or redo, manually edit the board, and continue with delta context.
-
-The History panel separates collaboration records from low-level run diagnostics.
-
-## Quick Start
+Use Node.js 20.19+ or 22.12+; Node.js 22 or newer is recommended.
 
 ```bash
 git clone https://github.com/AyingAI/agentboard.git
 cd agentboard
-npm install
-npm run dev
+npm ci
+npm run dev -- --host 127.0.0.1
 ```
 
-Open `http://localhost:5173`.
+Open the local URL printed in the terminal, normally `http://127.0.0.1:5173`.
 
-Then choose an agent provider from the settings panel:
+- **Try it first:** choose the interactive example on an empty canvas. The included compound-interest lab is pregenerated and works without an agent or a model call.
+- **Connect an agent:** open settings and select an installed, authenticated local CLI, or configure Claude / an OpenAI-compatible API.
+- **Start collaborating:** choose a starter task or activate the floating input strip. Select existing content to focus the next discussion on it.
 
-- **Local CLI**: auto-detects supported local CLIs such as Claude Code, OpenCode, Pi CLI, Codex CLI, Gemini CLI, Antigravity, Qwen Code, Cursor Agent, GitHub Copilot CLI, Qoder, Kimi, and Trae.
-- **Claude API**: use an Anthropic API key.
-- **OpenAI-compatible API**: use OpenAI or a compatible base URL.
+## Highlights in v0.3.5
 
-API keys are stored only in browser `localStorage`. Do not commit secrets into the repository.
+- **More canvas space:** the centered floating composer starts as a compact strip, expands on activation and collapses when empty and dismissed. Both sides of the canvas remain usable. Stop a run or write the next draft while waiting.
+- **Interactive content:** models can create HTML, SVG and JavaScript explanations, simulations and prototypes inside cards. Parameters and interaction state persist with the board.
+- **Continuity:** boards keep separate drafts, run records and pending proposals across reloads and board switches. One-click next steps execute without replacing an unsent draft.
+- **Reviewable changes:** low-risk additions apply directly; content rewrites, node/edge/group deletion and full-board layouts require confirmation. Compare versions and protect later human edits from stale proposals.
+- **Readable large boards:** measured card dimensions drive collision avoidance. Reading view, overview, content navigation and wheel panning help explore larger boards.
+- **Simpler board management:** switch, import and export from the title menu. A delete button changes in place to “确认删除”; click again to delete, or close the menu to cancel.
 
-On an empty board, use the detected local CLI or choose a starter task. The top-left canvas toolbar exposes card creation, zoom, fit-to-content, and shortcut help.
+See the [changelog](./CHANGELOG.md) for the complete history.
 
-## Canvas Basics
+## A typical workflow
+
+1. Ask the agent to compare three product directions and identify assumptions and validation methods.
+2. Move cards, edit text or adjust a visual's parameters directly.
+3. Select relevant cards and continue the discussion. Visuals also support detail references and discussion of their current state.
+4. Compare proposed changes before accepting or rejecting them.
+5. Execute a suggested next step or write your own; undo or export a backup when needed.
+
+This supports idea exploration, explanations, experiment design and simulations. Research and business conclusions still need real sources and observed data; example parameters and simulated outcomes do not validate real-world demand.
+
+## Connect an agent
+
+| Provider | Best fit | Setup |
+| --- | --- | --- |
+| Local CLI | Existing agent authentication, tools and skills | Install and authenticate a CLI, then select it in settings |
+| Claude API | API reasoning and structured output | API key, model and optional API URL |
+| OpenAI-compatible API | OpenAI or a compatible service | API key, base URL, model and output budget |
+
+Detection supports Claude Code, OpenCode, Pi, Codex, Gemini, Antigravity, Qwen Code, Cursor Agent, GitHub Copilot CLI, Qoder, Kimi and Trae. Settings show the detected version and exact executable path. Use refresh after installing or upgrading a CLI.
+
+CLI mode reuses local capabilities. API mode does not automatically have file, command or search tools. API requests originate in the browser, so the endpoint must allow the appropriate cross-origin requests. API keys and settings stay in browser `localStorage` and are not written to the repository.
+
+**The local CLI bridge works only in the Vite development server.** The output of `npm run build` and the `npm run preview` server do not include a CLI backend. Keep the development server local: it can launch supported CLIs on your machine.
+
+## Controls
+
+The interface currently uses Chinese labels.
 
 | Action | Interaction |
 | --- | --- |
-| Create card | Click `+ Card` in the top-left toolbar or double-click empty canvas |
-| Move card | Drag; marquee-select to move multiple cards |
-| Edit card text | Double-click title or body |
-| Create edge | Select a node, drag a connector handle to another node |
-| Edit edge label | Select or double-click the edge label |
-| Delete selection | Delete or Backspace |
-| Pan canvas | Space + drag, or middle mouse drag |
-| Zoom | Toolbar controls or `Cmd/Ctrl + wheel` |
-| Fit all content | Click `Fit content` in the toolbar |
-| Undo / redo | `Cmd/Ctrl + Z` / `Cmd/Ctrl + Shift + Z` (`Ctrl + Y` also works on Windows) |
-| Shortcut help | Click `?` or press `?` |
+| Write and send | Activate the bottom strip; Enter sends, Shift + Enter adds a line |
+| Create card | Click “+ 卡片” or double-click empty canvas |
+| Edit text | Double-click a card's title or body |
+| Move cards | Drag; marquee-select to move several cards |
+| Connect nodes | Drag a selected node's connector to another node |
+| Edit edge label | Select or double-click the label |
+| Delete selection | Delete / Backspace |
+| Browse and zoom | Wheel pans; Cmd/Ctrl + wheel zooms |
+| Pan | Space + drag or middle-button drag |
+| Reading / overview | “阅读” / “总览”, or jump through content navigation |
+| Undo / redo | Cmd/Ctrl + Z / Cmd/Ctrl + Shift + Z; Windows also supports Ctrl + Y |
+| Shortcuts | Click “?” or press ? |
+| Manage boards | Click the title for the menu; double-click it to rename |
 
-## Core Protocol
+## Save, recover and back up
 
-AgentBoard is built around a small board protocol.
+- Boards, drafts, run records, interaction state and pending proposals stay in the current browser.
+- Each board retains up to 25 undo/redo steps across reloads and board switches.
+- Export `.agentboard.json` from the board menu. Imports accept that format or raw `BoardDSL`, validate it and open it as a new board.
+- Saves attempt to retain a previous local copy. Missing or corrupt primary data triggers backup recovery when available; unavailable or full storage shows an export action.
+- Board exports include canvas content and visual state, excluding agent keys, conversation drafts and the complete run history.
+- Board deletion cannot be undone, and at least one board is kept. Export important work first. Clearing browser data removes local work; cloud sync and automatic cross-device recovery are not available.
 
-### `BoardDSL`
+## Protocol and visual runtime
 
-`BoardDSL` is the source of truth for the visible board:
-
-```ts
-type BoardDSL = {
-  version: string;
-  board: { id: string; title: string; viewport: { x: number; y: number; zoom: number } };
-  nodes: BoardNode[];
-  edges: BoardEdge[];
-  groups: BoardGroup[];
-  metadata: Record<string, unknown>;
-};
-```
-
-### `DSLPatch`
-
-Agents do not mutate the board directly. They return a patch:
+`src/types/dsl.ts` defines the shared protocol. Agents return validated `DSLPatch` operations rather than mutating the canvas directly. A request for a user answer or authorization uses `interaction_request`.
 
 ```ts
 type DSLPatch = {
   type: 'dsl_patch';
   summary: string;
   ops: PatchOp[];
-  questions?: string[];
+  actions?: { id: string; label: string; prompt: string; nodeIds?: string[] }[];
+  questions?: string[]; // legacy suggestions
 };
 ```
 
-Supported operations include `add_node`, `update_node`, `delete_node`, `add_edge`, `delete_edge`, `add_group`, `update_group`, `delete_group`, and `layout`.
+Operations add, update or delete cards, notes, groups and edges, or adjust layout. Invalid references, duplicate IDs, invalid geometry or scope violations fail the batch atomically. Recent conversation and human edits inform later requests; selected nodes keep their complete body text in context.
 
-Every patch is validated before it is applied. Invalid references, duplicate IDs, invalid geometry, schema mismatches, or operations beyond the granted scope fail atomically. Node/group deletion, content rewrites, and full-board layout require explicit confirmation.
+Cards can carry open visual content:
 
-### Local Data and Recovery
-
-- Each board keeps up to 25 undo and redo snapshots across refreshes and board switches.
-- The board menu exports a versioned `.agentboard.json` file and imports that format or raw `BoardDSL` JSON.
-- Imports are validated and opened as a new board instead of replacing current work.
-- Every save retains the previous local session copy; corrupted primary storage triggers visible backup recovery.
-
-### Delta Context Packets
-
-When the user edits the board and then calls an agent again, AgentBoard sends a compact delta context by default:
-
-- changed edit events
-- changed node IDs and edge IDs
-- full objects for changed nodes
-- edges related to changed nodes
-- lightweight nearby node summaries
-- compact board summary
-
-Global tasks such as full-board cleanup, export, or flow execution still receive full board context.
-
-## Architecture
-
-```txt
-React app
-  ├── BoardDSL state
-  ├── patch engine
-  ├── validation engine
-  ├── canvas renderer
-  └── agent adapters
-        ├── local CLI bridge
-        ├── Claude API
-        └── OpenAI-compatible API
+```ts
+visual: {
+  html: string;
+  state?: Record<string, unknown>;
+  height?: number;
+}
 ```
 
-Project layout:
+Visuals run in isolated iframes with this host bridge:
 
-```txt
-src/
-  types/dsl.ts           # protocol and shared types
-  engine/                # patch application and validation
-  agent/                 # adapters, prompts, parsing, resilience
-  hooks/                 # React state, dragging, panning, sessions
-  components/            # canvas and UI components
-  data/                  # initial board templates
-  storage.ts             # localStorage persistence
-agentBridgePlugin.ts     # Vite middleware for local CLI execution
+```js
+const saved = agentboard.getState();
+agentboard.setState({ years: 12 });
+const unsubscribe = agentboard.onStateChange(state => render(state));
+agentboard.ask('Continue from my parameters', { selectedOption: 'A' });
+agentboard.reference('This result', 'result-element-id');
 ```
 
-## Development
+`ask()` only drafts a request for the user to send; a host next-step button can start an agent call directly. Native controls with stable IDs or names automatically persist in `state._inputs`. Omitting `state` when updating `visual.html` preserves current state.
+
+Inline scripts and script libraries from jsDelivr, cdnjs, esm.sh and unpkg are supported. Visuals cannot access host storage, arbitrary network requests, remote images, nested iframes or top-level navigation. Complete responses are validated before visuals are applied. Progress shows actual activity, content clues and received characters, without invented percentages.
+
+## Development and tests
 
 ```bash
-npm run dev        # start Vite dev server
+npm run dev        # local development with the CLI bridge
 npm run typecheck  # TypeScript validation
-npm run test       # Vitest suite
-npm run build      # production build
+npm run test       # unit tests
+npm run test:e2e   # isolated browser regression tests; no real model calls
+npm run build      # build static output in dist/
+npm run preview    # preview static output; no CLI bridge
 ```
 
-## Current Status
+Browser tests use installed Chrome on macOS and Playwright Chromium elsewhere. Run `npx playwright install chromium` if required.
 
-AgentBoard is a prototype. It is useful for experimenting with structured agent collaboration, but it is not yet a hosted multi-user product.
-
-Current boundaries:
-
-- Local-first storage only, with manual `.agentboard.json` backup and transfer.
-- No server-backed account, permission, multiplayer, or sync model.
-- Local CLI bridge runs only in the Vite development server.
-- API keys remain in browser `localStorage`; use caution on shared devices.
-- External side effects should stay explicit and user-authorized.
-
-## Contributing
-
-Issues and pull requests are welcome. Before submitting changes, run:
+Live CLI tests are explicit opt-ins. They use the installed CLI's authentication and model quota:
 
 ```bash
-npm run typecheck
-npm run test
-npm run build
+AGENTBOARD_LIVE_CLI=codex npm run test:e2e -- e2e/live-agent.spec.ts --workers=1
+AGENTBOARD_LIVE_ACTIONS=pi npm run test:e2e -- e2e/live-actions.spec.ts --workers=1
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
+Test screenshots, traces, generated boards, build output and local runtime records are excluded from GitHub. Useful regression tests remain in `src/**/__tests__`, `src/**/*.test.ts` and `e2e/`.
+
+```text
+src/
+  types/          # board, agent and session protocols
+  engine/         # patch application, validation and history
+  agent/          # adapters, context, streaming and risk assessment
+  server/         # CLI catalog, discovery and event parsing
+  presentation/   # measured geometry and collision avoidance
+  visuals/        # visual contract and isolated runtime
+  hooks/          # React state and interactions
+  components/     # canvas, composer, settings and review
+  storage.ts      # local persistence and recovery
+agentBridgePlugin.ts # Vite CLI middleware
+```
+
+## Current boundaries
+
+AgentBoard remains a prototype for local use, without accounts, hosted services, multiplayer collaboration or cloud sync. Output quality depends on the chosen model and available evidence; not every CLI or third-party API version combination has been verified.
+
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for contributions and [SECURITY.md](./SECURITY.md) for local bridge and credential considerations.
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+[MIT](./LICENSE)

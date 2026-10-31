@@ -1,138 +1,18 @@
 import type { Plugin } from 'vite';
-import { execSync, spawn } from 'child_process';
+import { spawn } from 'child_process';
+import { KNOWN_CLIS } from './src/server/cliCatalog';
+import { createCliRegistry, discoverClis, publicCliInfo, type CliRegistry, type ResolvedCliInfo } from './src/server/cliDiscovery';
 import type { ChildProcessWithoutNullStreams } from 'child_process';
 import type { IncomingMessage, ServerResponse } from 'http';
 import { findAgentResponseJson } from './src/agent/response';
+import { readCliEvent, type CliOutputState } from './src/server/cliEvents';
+import { draftTitles } from './src/agent/liveProgress';
+import type { AgentProgressEvent } from './src/types/dsl';
 
-interface CliInfo {
-  id: string;
-  name: string;
-  available: boolean;
-  version?: string;
-}
-
-type CliPromptMode = 'stdin' | 'argument';
-
-type CliSpec = {
-  id: string;
-  name: string;
-  commands: string[];
-  versionArgs: string[];
-  args: string[];
-  promptMode: CliPromptMode;
-};
-
-const KNOWN_CLIS: CliSpec[] = [
-  {
-    id: 'claude',
-    name: 'Claude Code',
-    commands: ['claude'],
-    versionArgs: ['--version'],
-    args: [
-      '--permission-mode',
-      'auto',
-      '-p',
-      '--output-format',
-      'stream-json',
-      '--include-partial-messages',
-      '--verbose',
-    ],
-    promptMode: 'stdin',
-  },
-  {
-    id: 'opencode',
-    name: 'OpenCode',
-    commands: ['opencode'],
-    versionArgs: ['--version'],
-    args: ['run'],
-    promptMode: 'stdin',
-  },
-  {
-    id: 'pi',
-    name: 'Pi CLI',
-    commands: ['pi'],
-    versionArgs: ['--version'],
-    args: ['--print', '--mode', 'text'],
-    promptMode: 'stdin',
-  },
-  {
-    id: 'codex',
-    name: 'Codex CLI',
-    commands: ['codex'],
-    versionArgs: ['--version'],
-    args: ['exec', '--ask-for-approval', 'never', '--sandbox', 'workspace-write', '--color', 'never', '-'],
-    promptMode: 'stdin',
-  },
-  {
-    id: 'gemini',
-    name: 'Gemini CLI',
-    commands: ['gemini'],
-    versionArgs: ['--version'],
-    args: ['--prompt', '', '--output-format', 'text'],
-    promptMode: 'stdin',
-  },
-  {
-    id: 'antigravity',
-    name: 'Antigravity CLI',
-    commands: ['agy'],
-    versionArgs: ['--version'],
-    args: ['-p'],
-    promptMode: 'argument',
-  },
-  {
-    id: 'qwen',
-    name: 'Qwen Code',
-    commands: ['qwen', 'qwen-code'],
-    versionArgs: ['--version'],
-    args: ['--prompt', '', '--output-format', 'text'],
-    promptMode: 'stdin',
-  },
-  {
-    id: 'cursor-agent',
-    name: 'Cursor Agent',
-    commands: ['cursor-agent'],
-    versionArgs: ['--version'],
-    args: ['-p'],
-    promptMode: 'argument',
-  },
-  {
-    id: 'copilot',
-    name: 'GitHub Copilot CLI',
-    commands: ['copilot'],
-    versionArgs: ['--version'],
-    args: ['-s', '-p'],
-    promptMode: 'argument',
-  },
-  {
-    id: 'qoder',
-    name: 'Qoder CLI',
-    commands: ['qodercli', 'qoderclicn'],
-    versionArgs: ['--version'],
-    args: ['-q', '--output-format', 'text', '-p'],
-    promptMode: 'argument',
-  },
-  {
-    id: 'kimi',
-    name: 'Kimi Code CLI',
-    commands: ['kimi', 'kimi-cli'],
-    versionArgs: ['--version'],
-    args: ['--output-format', 'text', '-p'],
-    promptMode: 'argument',
-  },
-  {
-    id: 'trae',
-    name: 'Trae CLI',
-    commands: ['trae-cli'],
-    versionArgs: ['--version'],
-    args: ['run'],
-    promptMode: 'argument',
-  },
-];
-
-const CLI_TIMEOUT_MS = 240_000;
+const CLI_TIMEOUT_MS = 600_000;
 const HEARTBEAT_INTERVAL_MS = 5_000;
 const RUN_RETENTION_MS = 10 * 60_000;
-const MAX_INCOMPLETE_OUTPUT_CHARS = 12_000;
+const MAX_INCOMPLETE_OUTPUT_CHARS = 4_000_000;
 
 type StoredRun = {
   status: 'running' | 'completed' | 'failed' | 'cancelled';
@@ -144,142 +24,19 @@ type StoredRun = {
 
 const activeRuns = new Map<string, StoredRun>();
 
-function detectCLIs(): CliInfo[] {
-  return KNOWN_CLIS.map((cli) => {
-    try {
-      const detected = resolveCliCommand(cli);
-      if (!detected) throw new Error('CLI not found');
-      let version = '';
-      try {
-        version = execSync([detected.command, ...cli.versionArgs].join(' '), { stdio: 'pipe', encoding: 'utf-8' }).trim();
-      } catch {
-        // version check is best-effort
-      }
-      return { id: cli.id, name: cli.name, available: true, version: version || detected.path };
-    } catch {
-      return { id: cli.id, name: cli.name, available: false };
-    }
-  });
-}
-
 function getCliSpec(cliId: string) {
-  return KNOWN_CLIS.find((cli) => cli.id === cliId);
+  return KNOWN_CLIS.find(cli => cli.id === cliId);
 }
-
-function resolveCliCommand(cli: CliSpec) {
-  for (const command of cli.commands) {
-    try {
-      const path = execSync(`which ${command}`, { stdio: 'pipe', encoding: 'utf-8' }).trim();
-      if (path) return { command, path };
-    } catch {
-      // Try the next alias.
-    }
-  }
-  return null;
-}
-
-type BridgeProgressEvent = {
-  type: 'connected' | 'working' | 'tool' | 'output' | 'heartbeat';
-  message: string;
-  detail?: string;
-  elapsedMs?: number;
-  outputChars?: number;
-};
 
 function writeStreamEvent(
   res: ServerResponse,
   event:
-    | { type: 'progress'; event: BridgeProgressEvent }
+    | { type: 'progress'; event: AgentProgressEvent }
     | { type: 'result'; text: string }
     | { type: 'error'; message: string },
 ) {
   if (!res.writableEnded && !res.destroyed) {
     res.write(`${JSON.stringify(event)}\n`);
-  }
-}
-
-function toolLabel(name: string) {
-  const labels: Record<string, string> = {
-    Bash: '运行命令',
-    Read: '读取文件',
-    Edit: '编辑文件',
-    Write: '写入文件',
-    Glob: '查找文件',
-    Grep: '搜索内容',
-    WebSearch: '搜索网页',
-    WebFetch: '读取网页',
-  };
-  return labels[name] ?? `使用工具 ${name}`;
-}
-
-function handleClaudeEvent(
-  line: string,
-  res: ServerResponse,
-  state: {
-    partialText: string;
-    assistantText: string;
-    resultText: string;
-    lastTool?: string;
-    lastOutputSentAt: number;
-  },
-) {
-  let event: Record<string, unknown>;
-  try {
-    event = JSON.parse(line) as Record<string, unknown>;
-  } catch {
-    return;
-  }
-
-  if (event.type === 'system' && event.subtype === 'init') {
-    writeStreamEvent(res, {
-      type: 'progress',
-      event: { type: 'connected', message: 'Claude Code 已启动，正在分析任务' },
-    });
-    return;
-  }
-
-  if (event.type === 'stream_event') {
-    const streamEvent = event.event as Record<string, unknown> | undefined;
-    if (streamEvent?.type === 'content_block_delta') {
-      const delta = streamEvent.delta as Record<string, unknown> | undefined;
-      if (delta?.type === 'text_delta' && typeof delta.text === 'string') {
-        state.partialText += delta.text;
-        const now = Date.now();
-        if (state.lastOutputSentAt === 0 || now - state.lastOutputSentAt >= 300) {
-          state.lastOutputSentAt = now;
-          writeStreamEvent(res, {
-            type: 'progress',
-            event: {
-              type: 'output',
-              message: `正在生成结构化结果（${state.partialText.length} 字）`,
-              outputChars: state.partialText.length,
-            },
-          });
-        }
-      }
-    }
-    return;
-  }
-
-  if (event.type === 'assistant') {
-    const message = event.message as { content?: Array<Record<string, unknown>> } | undefined;
-    for (const block of message?.content ?? []) {
-      if (block.type === 'tool_use' && typeof block.name === 'string' && block.name !== state.lastTool) {
-        state.lastTool = block.name;
-        writeStreamEvent(res, {
-          type: 'progress',
-          event: { type: 'tool', message: toolLabel(block.name) },
-        });
-      }
-      if (block.type === 'text' && typeof block.text === 'string') {
-        state.assistantText = block.text;
-      }
-    }
-    return;
-  }
-
-  if (event.type === 'result' && typeof event.result === 'string') {
-    state.resultText = event.result;
   }
 }
 
@@ -295,19 +52,19 @@ function buildTimeoutInteractionJson(requestId: string, text: string) {
     type: 'interaction_request',
     runId: requestId,
     kind: 'clarification',
-    title: '本地 Agent 输出过长',
+    title: '这次生成未能完成',
     message: hasPartialOutput
       ? [
           '本地 CLI 已运行到时间上限，但输出仍未形成可安全应用的完整 JSON。',
-          '我已经保留了部分输出线索。建议把这次任务拆小，例如先生成「产品定位 + 核心判断 + 目标客户」三个节点，再继续补充其它模块。',
+          '可以重新尝试原来的目标，也可以先聚焦其中一部分。',
           snippet ? `部分输出：${snippet}` : '',
         ].filter(Boolean).join('\n\n')
       : '本地 CLI 已运行到时间上限且没有返回可用输出。建议缩小任务范围后重试。',
     options: [
       {
         id: 'first_slice',
-        label: '先生成前三块',
-        description: '只生成产品定位、核心判断、目标客户，降低超时和 JSON 损坏概率。',
+        label: '重新尝试原来的目标',
+        description: '保留原始需求，再尝试一次。',
       },
       {
         id: 'smaller_custom',
@@ -322,35 +79,35 @@ function buildTimeoutInteractionJson(requestId: string, text: string) {
 /** Run a CLI via stdin and stream sanitized execution events to the browser. */
 function runCLIStream(
   requestId: string,
-  cliId: string,
+  cli: ResolvedCliInfo,
   systemPrompt: string,
   userMessage: string,
   res: ServerResponse,
   run: StoredRun,
 ): Promise<string> {
   const fullPrompt = `${systemPrompt}\n\n---\n\n${userMessage}`;
-  const spec = getCliSpec(cliId);
-  if (!spec) return Promise.reject(new Error(`Unsupported CLI "${cliId}"`));
-  const detected = resolveCliCommand(spec);
-  if (!detected) return Promise.reject(new Error(`CLI "${spec.name}" is not available`));
-  const isClaude = spec.id === 'claude';
+  const spec = getCliSpec(cli.id);
+  if (!spec || !cli.path) return Promise.reject(new Error(`CLI "${cli.name}" is not available`));
+  const usesEvents = ['claude', 'pi', 'codex'].includes(spec.id);
   const args = spec.promptMode === 'argument' ? [...spec.args, fullPrompt] : spec.args;
 
   return new Promise((resolve, reject) => {
     const startedAt = Date.now();
-    const state = {
+    const state: CliOutputState = {
       partialText: '',
       assistantText: '',
       resultText: '',
       lastTool: undefined as string | undefined,
       lastOutputSentAt: 0,
+      seenTools: new Set(),
+      outputChars: 0,
     };
     let stdoutBuffer = '';
     let stderr = '';
     let settled = false;
-    const child = spawn(detected.command, args, {
+    const child = spawn(cli.path!, args, {
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: process.env,
+      env: { ...process.env, PATH: cli.runtimePath || process.env.PATH },
     });
     run.child = child;
     run.updatedAt = Date.now();
@@ -365,7 +122,7 @@ function runCLIStream(
 
     writeStreamEvent(res, {
       type: 'progress',
-      event: { type: 'connected', message: `已连接 ${spec.name}，正在启动执行` },
+      event: { type: 'connected', message: `已连接 ${spec.name}${cli.version ? ` · ${cli.version}` : ''}，正在启动执行`, detail: cli.path },
     });
 
     const heartbeat = setInterval(() => {
@@ -374,7 +131,7 @@ function runCLIStream(
         type: 'progress',
         event: {
           type: 'heartbeat',
-          message: `Agent 仍在执行（${Math.round(elapsedMs / 1000)}s）`,
+          message: '本地进程仍在运行',
           elapsedMs,
         },
       });
@@ -382,7 +139,7 @@ function runCLIStream(
 
     const timeout = setTimeout(() => {
       if (finishIfCompleteResponse()) return;
-      const text = state.resultText || state.assistantText || state.partialText;
+      const text = state.resultText || state.partialText || state.assistantText;
       child.kill('SIGTERM');
       finish(() => {
         writeStreamEvent(res, {
@@ -394,7 +151,7 @@ function runCLIStream(
     }, CLI_TIMEOUT_MS);
 
     const finishIfCompleteResponse = () => {
-      const text = state.resultText || state.assistantText || state.partialText;
+      const text = state.resultText || state.partialText || state.assistantText;
       const responseJson = findAgentResponseJson(text);
       if (!responseJson) return false;
 
@@ -410,7 +167,7 @@ function runCLIStream(
     };
 
     const finishIfOutputTooLarge = () => {
-      const text = state.resultText || state.assistantText || state.partialText;
+      const text = state.resultText || state.partialText || state.assistantText;
       if (text.length < MAX_INCOMPLETE_OUTPUT_CHARS || findAgentResponseJson(text)) return false;
 
       finish(() => {
@@ -424,30 +181,30 @@ function runCLIStream(
       return true;
     };
 
+    const reportOutput = () => {
+      const now = Date.now();
+      const text = state.resultText || state.partialText || state.assistantText;
+      if (!text || (state.lastOutputSentAt && now - state.lastOutputSentAt < 300)) return;
+      state.lastOutputSentAt = now;
+      writeStreamEvent(res, { type: 'progress', event: {
+        type: 'output', message: '正在生成内容', outputChars: state.outputChars || text.length,
+        previewTitles: draftTitles(text),
+      } });
+    };
+    const consumeLine = (line: string) => {
+      for (const event of readCliEvent(spec.id, line, state)) writeStreamEvent(res, { type: 'progress', event });
+    };
     child.stdout.setEncoding('utf-8');
     child.stdout.on('data', (chunk: string) => {
-      if (!isClaude) {
-        state.assistantText += chunk;
-        const now = Date.now();
-        if (state.lastOutputSentAt === 0 || now - state.lastOutputSentAt >= 300) {
-          state.lastOutputSentAt = now;
-          writeStreamEvent(res, {
-            type: 'progress',
-            event: {
-              type: 'output',
-              message: `正在生成结构化结果（${state.assistantText.length} 字）`,
-              outputChars: state.assistantText.length,
-            },
-          });
-        }
-        if (!finishIfCompleteResponse()) finishIfOutputTooLarge();
-        return;
+      if (settled) return;
+      if (!usesEvents) { state.assistantText += chunk; state.outputChars += chunk.length; }
+      else {
+        stdoutBuffer += chunk;
+        const lines = stdoutBuffer.split('\n');
+        stdoutBuffer = lines.pop() ?? '';
+        for (const line of lines) consumeLine(line);
       }
-
-      stdoutBuffer += chunk;
-      const lines = stdoutBuffer.split('\n');
-      stdoutBuffer = lines.pop() ?? '';
-      for (const line of lines) handleClaudeEvent(line, res, state);
+      reportOutput();
       if (!finishIfCompleteResponse()) finishIfOutputTooLarge();
     });
 
@@ -458,8 +215,8 @@ function runCLIStream(
 
     child.on('error', (error) => finish(() => reject(error)));
     child.on('close', (code, signal) => {
-      if (stdoutBuffer.trim() && isClaude) handleClaudeEvent(stdoutBuffer, res, state);
-      const text = state.resultText || state.assistantText || state.partialText;
+      if (stdoutBuffer.trim() && usesEvents) consumeLine(stdoutBuffer);
+      const text = state.resultText || state.partialText || state.assistantText;
       if (code === 0 && text.trim()) {
         finish(() => resolve(text.trim()));
         return;
@@ -489,20 +246,23 @@ function parseBody(req: IncomingMessage): Promise<string> {
 type MiddlewareFn = (req: IncomingMessage, res: ServerResponse, next: () => void) => void;
 
 /** Create a single middleware that handles both /api/clis and /api/agent/run */
-function createApiHandler(clis: CliInfo[]): MiddlewareFn {
+function createApiHandler(registry: CliRegistry): MiddlewareFn {
   return (req, res, next) => {
     const url = new URL(req.url || '/', 'http://localhost');
 
     // GET /api/clis
     if (url.pathname === '/api/clis' && req.method === 'GET') {
       res.setHeader('Content-Type', 'application/json');
-      res.end(JSON.stringify(clis));
+      res.setHeader('Cache-Control', 'no-store');
+      registry.get(url.searchParams.get('refresh') === '1')
+        .then(clis => res.end(JSON.stringify(clis.map(publicCliInfo))))
+        .catch(() => { res.statusCode = 500; res.end(JSON.stringify({ error: '本地 CLI 检测失败，请重试。' })); });
       return;
     }
 
     // POST /api/agent/run
     if (url.pathname === '/api/agent/run' && req.method === 'POST') {
-      handleRun(req, res, clis);
+      handleRun(req, res, registry);
       return;
     }
 
@@ -520,7 +280,7 @@ function createApiHandler(clis: CliInfo[]): MiddlewareFn {
   };
 }
 
-async function handleRun(req: IncomingMessage, res: ServerResponse, clis: CliInfo[]) {
+async function handleRun(req: IncomingMessage, res: ServerResponse, registry: CliRegistry) {
   let requestId = '';
   try {
     const body = await parseBody(req);
@@ -537,6 +297,8 @@ async function handleRun(req: IncomingMessage, res: ServerResponse, clis: CliInf
       return;
     }
 
+    const clis = await registry.get(true);
+    if (res.destroyed || res.writableEnded) return;
     const cli = clis.find((c) => c.id === cliId);
     if (!cli || !cli.available) {
       res.statusCode = 400;
@@ -554,7 +316,7 @@ async function handleRun(req: IncomingMessage, res: ServerResponse, clis: CliInf
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.flushHeaders();
 
-    const text = await runCLIStream(requestId, cliId, systemPrompt, userMessage, res, run);
+    const text = await runCLIStream(requestId, cli, systemPrompt, userMessage, res, run);
     run.status = 'completed';
     run.text = text;
     run.child = undefined;
@@ -638,13 +400,9 @@ export function agentBridgePlugin(): Plugin {
   return {
     name: 'agent-bridge',
     configureServer(server) {
-      const clis = detectCLIs();
-      console.log(
-        '[agent-bridge] Detected CLIs:',
-        clis.filter((c) => c.available).map((c) => c.name).join(', ') || 'none',
-      );
+      const registry = createCliRegistry(() => discoverClis(KNOWN_CLIS));
 
-      const handler = createApiHandler(clis);
+      const handler = createApiHandler(registry);
 
       // Add to middleware stack — goes to the end
       server.middlewares.use(handler);

@@ -1,7 +1,9 @@
-import { useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type FocusEvent } from 'react';
-import type { BoardDSL, BoardNode as BoardNodeType } from '../types/dsl';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type FocusEvent } from 'react';
+import type { ActivityEntry, BoardDSL, BoardNode as BoardNodeType, VisualReference } from '../types/dsl';
 import BoardNode from './BoardNode';
 import EmptyBoardWelcome from './EmptyBoardWelcome';
+import EmptyBoardWorking from './EmptyBoardWorking';
+import type { RenderedNodeSize } from '../presentation/layout';
 
 interface EditState {
   nodeId: string;
@@ -24,6 +26,9 @@ interface EdgeEditState {
 
 interface BoardCanvasProps {
   board: BoardDSL;
+  sessionId: string;
+  isSettling: boolean;
+  onNodesMeasured: (sessionId: string, sizes: RenderedNodeSize[]) => void;
   selectedNodeId: string | null;
   selectedNodeIds: string[];
   selectedEdgeId: string | null;
@@ -35,6 +40,7 @@ interface BoardCanvasProps {
   isSpaceHeld: boolean;
   isPanning: boolean;
   isAgentPending: boolean;
+  runningActivity?: ActivityEntry | null;
   highlightedNodeIds: string[];
   highlightedEdgeIds: string[];
   isAgentConfigured: boolean;
@@ -45,7 +51,7 @@ interface BoardCanvasProps {
   onPointerDown: (nodeId: string, event: React.PointerEvent) => void;
   onEdgePointerDown: (edgeId: string, event: React.PointerEvent) => void;
   onCanvasPointerDown: (e: React.PointerEvent) => boolean;
-  onCanvasWheel: (e: React.WheelEvent<HTMLDivElement>) => void;
+  onCanvasWheel: (e: WheelEvent) => void;
   onDeselectAll: () => void;
   onStartEdit: (nodeId: string, field: 'title' | 'body') => void;
   onCommitEdit: (nodeId: string, field: 'title' | 'body', value: string) => void;
@@ -63,6 +69,10 @@ interface BoardCanvasProps {
   onConnectCli: (cliId: string) => void;
   onOpenAgentConfig: () => void;
   onChooseStarterTask: (prompt: string) => void;
+  onVisualStateChange: (nodeId: string, state: Record<string, unknown>) => void;
+  onVisualReference: (reference: VisualReference) => void;
+  onVisualAsk: (nodeId: string, text: string) => void;
+  onOpenExample: () => Promise<void>;
 }
 
 interface SelectionBox {
@@ -292,6 +302,9 @@ function sameMeasurements(a: NodeMeasurements, b: NodeMeasurements) {
 
 export default function BoardCanvas({
   board,
+  sessionId,
+  isSettling,
+  onNodesMeasured,
   selectedNodeId,
   selectedNodeIds,
   selectedEdgeId,
@@ -303,6 +316,7 @@ export default function BoardCanvas({
   isSpaceHeld,
   isPanning,
   isAgentPending,
+  runningActivity,
   highlightedNodeIds,
   highlightedEdgeIds,
   isAgentConfigured,
@@ -331,6 +345,10 @@ export default function BoardCanvas({
   onConnectCli,
   onOpenAgentConfig,
   onChooseStarterTask,
+  onVisualStateChange,
+  onVisualReference,
+  onVisualAsk,
+  onOpenExample,
 }: BoardCanvasProps) {
   const [nodeMeasurements, setNodeMeasurements] = useState<NodeMeasurements>(() => new Map());
   const [selectionBox, setSelectionBox] = useState<SelectionBox | null>(null);
@@ -360,6 +378,7 @@ export default function BoardCanvas({
     const boardEl = boardRef.current;
     if (!boardEl) return;
 
+    let frame = 0;
     const measureNodes = () => {
       const next: NodeMeasurements = new Map();
       boardEl.querySelectorAll<HTMLElement>('.board-node[data-node-id]').forEach((element) => {
@@ -373,6 +392,8 @@ export default function BoardCanvas({
       });
 
       setNodeMeasurements((prev) => sameMeasurements(prev, next) ? prev : next);
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => onNodesMeasured(sessionId, [...next].map(([id, size]) => ({ id, ...size }))));
     };
 
     measureNodes();
@@ -383,8 +404,21 @@ export default function BoardCanvas({
       observer.observe(element);
     });
 
-    return () => observer.disconnect();
-  }, [board.nodes, boardRef, zoom]);
+    return () => { observer.disconnect(); cancelAnimationFrame(frame); };
+  }, [board.nodes, boardRef, zoom, onNodesMeasured, sessionId]);
+
+  const wheelHandler = useRef(onCanvasWheel);
+  wheelHandler.current = onCanvasWheel;
+  useEffect(() => {
+    const canvas = boardRef.current;
+    if (!canvas) return;
+    const wheel = (event: WheelEvent) => {
+      if ((event.target as HTMLElement).closest('.visual-surface,textarea,input,select,.deep-dive-panel')) return;
+      wheelHandler.current(event);
+    };
+    canvas.addEventListener('wheel', wheel, { passive: false });
+    return () => canvas.removeEventListener('wheel', wheel);
+  }, [boardRef]);
 
   function worldPointFromEvent(event: React.PointerEvent | PointerEvent) {
     const rect = boardRef.current?.getBoundingClientRect();
@@ -489,7 +523,6 @@ export default function BoardCanvas({
         backgroundSize: `${24 * zoom}px ${24 * zoom}px`,
         backgroundPosition: `${panOffset.x}px ${panOffset.y}px`,
       }}
-      onWheel={onCanvasWheel}
       onPointerDown={(e) => {
         const handled = onCanvasPointerDown(e);
         if (handled) return;
@@ -508,7 +541,7 @@ export default function BoardCanvas({
       }}
     >
       <div
-        className="canvas-content"
+        className={`canvas-content${isSettling && board.nodes.length ? ' presentation-settling' : ''}`}
         style={{
           width: contentSize.w,
           height: contentSize.h,
@@ -609,6 +642,9 @@ export default function BoardCanvas({
             onPointerDown={onPointerDown} onStartEdit={onStartEdit}
             onCommitEdit={onCommitEdit} onCancelEdit={onCancelEdit}
             onOpenDeepDive={onOpenDeepDive}
+            onVisualStateChange={onVisualStateChange}
+            onVisualReference={onVisualReference}
+            onVisualAsk={onVisualAsk}
             onConnectStart={(nodeId, side) => {
               const measuredNode = nodeMap.get(nodeId);
               if (!measuredNode) return;
@@ -642,13 +678,14 @@ export default function BoardCanvas({
         ) : null}
       </div>
 
-      {board.nodes.length === 0 && (
+      {board.nodes.length === 0 && (isAgentPending ? <EmptyBoardWorking activity={runningActivity} /> : (
         <EmptyBoardWelcome
           isAgentConfigured={isAgentConfigured}
           configuredCliId={configuredCliId}
           onConnectCli={onConnectCli}
           onOpenConfig={onOpenAgentConfig}
           onChooseTask={onChooseStarterTask}
+          onOpenExample={onOpenExample}
           onCreateCard={() => {
             const rect = boardRef.current?.getBoundingClientRect();
             if (!rect) return;
@@ -658,7 +695,7 @@ export default function BoardCanvas({
             );
           }}
         />
-      )}
+      ))}
     </div>
   );
 }

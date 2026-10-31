@@ -5,7 +5,7 @@ Thanks for your interest in AgentBoard.
 ## Development Setup
 
 ```bash
-npm install
+npm ci
 npm run dev
 ```
 
@@ -14,8 +14,14 @@ Before opening a pull request, run:
 ```bash
 npm run typecheck
 npm run test
+npm run test:e2e
 npm run build
 ```
+
+Browser tests use installed Chrome on macOS, or Playwright Chromium elsewhere.
+Install Chromium with `npx playwright install chromium` if needed. The default
+suite uses test responses; live CLI tests require an explicit opt-in and use model
+quota. See the README for commands.
 
 ## Contribution Scope
 

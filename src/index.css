@@ -440,14 +440,6 @@ button:disabled {
   grid-template-columns: minmax(740px, 1fr) 320px;
 }
 
-.workspace.with-inspector {
-  grid-template-columns: minmax(720px, 1fr) 380px;
-}
-
-.workspace.with-inspector.activity-open {
-  grid-template-columns: minmax(720px, 1fr) 320px 380px;
-}
-
 .canvas-panel {
   position: relative;
   min-width: 0;
@@ -1559,8 +1551,7 @@ button:disabled {
   box-shadow: 0 1px 3px rgba(31, 35, 41, 0.10);
 }
 
-.activity-panel h1,
-.inspector-panel h1 {
+.activity-panel h1 {
   margin: 0;
   font-size: 16px;
 }
@@ -2501,68 +2492,6 @@ button:disabled {
   font-size: 11px;
   line-height: 1.45;
   padding: 7px 9px;
-}
-
-/* ── Inspector panel ── */
-
-.inspector-panel {
-  min-width: 0;
-  overflow: auto;
-  background: #ffffff;
-  border-left: 1px solid #d7dce4;
-  padding: 18px 16px;
-}
-
-.inspector-panel pre {
-  max-height: 220px;
-  overflow: auto;
-  margin: 10px 0 0;
-  border-radius: 7px;
-  background: #f4f6f9;
-  color: #3c4656;
-  font-size: 11px;
-  line-height: 1.45;
-  padding: 10px;
-  white-space: pre-wrap;
-}
-
-.inspector-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.inspector-actions {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.inspector-panel section {
-  margin-top: 18px;
-}
-
-.inspector-panel h2 {
-  margin: 0 0 8px;
-  color: #596477;
-  font-size: 13px;
-}
-
-.ok-state {
-  margin: 0;
-  border-radius: 7px;
-  background: #edf8ef;
-  color: #2f7145;
-  padding: 10px;
-  font-size: 13px;
-}
-
-.error-list {
-  margin: 0;
-  padding-left: 18px;
-  color: #a64223;
-  font-size: 13px;
 }
 
 /* ── Prompt bar extras ── */

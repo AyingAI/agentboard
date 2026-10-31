@@ -36,7 +36,6 @@ src/
     __tests__/           # Agent 层测试
   hooks/
     useBoardSessions.ts  # 多白板 session CRUD + 当前 session 管理
-    useBoardState.ts     # 单白板校验
     useAgent.ts          # Agent 调用入口（根据 config 选适配器）
     useAgentConfig.ts    # Agent 配置持久化（localStorage）
     useDrag.ts           # 节点拖拽
@@ -48,7 +47,6 @@ src/
     PromptBar.tsx        # 底部输入栏 + 发送 + 进度指示器
     ActivityPanel.tsx    # 右侧活动面板（Agent 操作历史）
     AgentConfig.tsx      # Agent 设置弹窗（选择 Provider、填 Key、选 CLI）
-    InspectorPanel.tsx   # DSL 内部调试面板组件；不要接入普通用户默认界面
   data/
     initialBoard.ts      # 初始演示数据 + emptyBoard 空模板
   storage.ts             # localStorage 读写：sessions + agent config
@@ -56,6 +54,17 @@ agentBridgePlugin.ts     # Vite 插件：本地 CLI 检测 + 代理执行
 ```
 
 ## 核心架构
+
+### 0.3 开放交互视觉
+
+- card/note 可以携带可选 `visual: { html, state?, height? }`；HTML/SVG/JS 由模型自由生成，不使用封闭组件目录。
+- `src/visuals/` 提供契约、隔离运行时与 patch 扩展；`VisualSurface.tsx` 提供展开、细节引用、状态恢复和错误处理。
+- 扩展验证通过 `applyVisualPatch` 包装原有引擎，不修改稳定的 patch/validation 核心。视觉改写纳入提案审阅，检查等待期间的内容冲突。
+- 模型代码通过 `agentboard.getState/setState/onStateChange/ask/reference` 与宿主协作；ask 只起草请求，不自动调用 Agent。不要在宿主 DOM 执行模型代码。
+- `DSLPatch.actions` 用于宿主呈现的执行选项，包含 id/label/prompt/可选 nodeIds。仅用户点击宿主按钮会直接提交；视觉 SDK 的 ask 仍只起草，不自动执行。真实待回答问题用 interaction_request。
+- `src/presentation/layout.ts` 和 `useBoardPresentation` 按 DOM 实测尺寸处理避让，保留分组和无关对象的位置，几何修正与原 Agent 事务共享撤销；metadata["agentboard.presentation"] 保存原始内容最小高度，让后续缩短的内容能正常收缩。布局提示只放在 prompt 中，运行时不要因关键词擅自添加 layout 操作或扩大 scope。不要修改稳定 engine/patch.ts 或 engine/validation.ts。
+- 新消息会带上近期用户事件与 Agent 摘要；不要恢复每轮最多 3 个操作、固定卡片数量或强制组件模板等表达限制。
+- `npm run test:e2e` 验证真实浏览器交互；显式设置 `AGENTBOARD_LIVE_CLI=codex` 可运行真实 CLI 测试，它使用模型配额。示例内容明确标注来源，不冒充实时模型调用。
 
 ### DSL 模型
 
@@ -113,7 +122,7 @@ AgentBoard 是「用户可见型 Agent 产品」，不是模型项目。它的�
 2. **DSL schema 单一来源（红线）**——`dsl.ts` 是唯一权威定义。`prompts.ts` 里给 Agent 的文本 schema 必须与 `dsl.ts` 保持一致；改任一处都要同步另一处，并用测试断言两者字段对齐。schema 复制是本项目最隐蔽的故障源（TS 编译器不报，Agent 却拿到错契约）。
 3. **Python 只进模型/数据层**——若未来引入 embedding、离线知识库、eval，才用 Python，且不让它成为产品主栈。小团队优先减少系统边界。
 4. **Agent runtime 是状态机，按事件系统对待**——长期演进方向是补齐以下韧性能力（按当前实现状态判断，不要默认全都有）：
-   - 本地 Claude CLI 已通过 NDJSON 流式回传启动、工具、生成字数和心跳事件；最终 DSL 仍在完整收齐后解析和应用
+   - Pi / Claude Code / Codex CLI 通过 NDJSON 流式回传启动、工具、内容标题、字符数和心跳事件；API 解析 SSE 文本增量。不要用时间推算百分比或伪造模型进度，也不要展示隐藏推理或原始工具参数。最终 DSL 仍在完整收齐后解析和应用
    - cancel 已实现（`AbortController` + 输入栏停止按钮）
    - retry / timeout 已实现基础版（瞬时错误重试，单次调用超时）
    - resumable state 已实现基础版（session 内持久化 `activities` / `runs`，刷新后 interaction 可继续）

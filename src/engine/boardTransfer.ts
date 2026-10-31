@@ -1,5 +1,6 @@
 import type { BoardDSL, BoardSession } from '../types/dsl';
 import { validateBoard } from './validation';
+import { boardVisualErrors } from '../visuals/contract';
 
 export const BOARD_EXPORT_FORMAT = 'agentboard.board.v1';
 
@@ -27,11 +28,13 @@ export function parseBoardImport(text: string): { title: string; board: BoardDSL
     throw new Error('文件不是有效的 JSON。');
   }
 
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('文件中没有找到白板数据。');
   const record = value as Partial<BoardExportFile> & Partial<BoardDSL>;
   const board = record.format === BOARD_EXPORT_FORMAT ? record.board : value as BoardDSL;
   if (!board || typeof board !== 'object') throw new Error('文件中没有找到白板数据。');
 
-  const errors = validateBoard(board);
+  const structuralErrors = validateBoard(board);
+  const errors = structuralErrors.length ? structuralErrors : boardVisualErrors(board);
   if (errors.length > 0) {
     throw new Error(`白板校验失败：${errors[0].message}`);
   }

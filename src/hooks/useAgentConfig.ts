@@ -45,5 +45,13 @@ export function useAgentConfig() {
     });
   }, []);
 
-  return { config, setProvider, setApiKey, setModel, setCliId, setBaseUrl };
+  const setMaxOutputTokens = useCallback((maxOutputTokens: number) => {
+    setConfig(prev => {
+      const next = { ...prev, maxOutputTokens };
+      saveAgentConfig(next);
+      return next;
+    });
+  }, []);
+
+  return { config, setProvider, setApiKey, setModel, setCliId, setBaseUrl, setMaxOutputTokens };
 }

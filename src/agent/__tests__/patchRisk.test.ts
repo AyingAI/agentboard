@@ -55,4 +55,13 @@ describe('assessPatchRisk', () => {
     expect(result.requiresConfirmation).toBe(true);
     expect(result.reasons).toContain('full_board_layout');
   });
+
+  it('requires review for deleting a relationship or rewriting a group', () => {
+    const result = assessPatchRisk(patch([
+      { op: 'delete_edge', edgeId: 'e1' },
+      { op: 'update_group', groupId: 'g1', changes: { title: 'Replacement' } },
+    ]));
+    expect(result.requiresConfirmation).toBe(true);
+    expect(result.reasons).toEqual(['delete_edge', 'rewrite_content']);
+  });
 });

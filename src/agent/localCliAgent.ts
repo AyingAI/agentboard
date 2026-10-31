@@ -3,24 +3,19 @@ import { buildSystemPrompt, buildUserMessage } from './prompts';
 import { fallbackInteractionFromText, parseAgentResponse } from './response';
 import { mapAbortError, withTimeout } from './resilience';
 import { consumeAgentStream } from './stream';
+import type { LocalCliInfo } from '../types/dsl';
 
-const LOCAL_CLI_TIMEOUT_MS = 300_000;
+const LOCAL_CLI_TIMEOUT_MS = 660_000;
 const POLL_INTERVAL_MS = 1_000;
 
-interface CliInfo {
-  id: string;
-  name: string;
-  available: boolean;
-  version?: string;
-}
-
 /** Fetch available CLIs from the dev server. Returns empty on any error. */
-async function fetchCLIs(): Promise<CliInfo[]> {
+async function fetchCLIs(refresh = false, strict = false): Promise<LocalCliInfo[]> {
   try {
-    const res = await fetch('/api/clis');
-    if (!res.ok) return [];
+    const res = await fetch(refresh ? '/api/clis?refresh=1' : '/api/clis', { cache: 'no-store' });
+    if (!res.ok) throw new Error('无法读取本地 CLI，请确认开发服务正在运行。');
     return res.json();
-  } catch {
+  } catch (error) {
+    if (strict) throw error;
     return [];
   }
 }
@@ -145,7 +140,7 @@ function buildLostRunInteractionJson(requestId: string): string {
       {
         id: 'retry_smaller',
         label: '缩小范围重试',
-        description: '只生成 1-3 个节点，成功后再继续补充。',
+        description: '聚焦最相关的内容，保留已有成果后继续。',
       },
       {
         id: 'custom_scope',

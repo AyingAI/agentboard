@@ -1,7 +1,7 @@
 import type { AgentError } from './types';
 
-/** Default per-attempt timeout for an agent call (ms). Local CLIs can be slow. */
-export const DEFAULT_TIMEOUT_MS = 120_000;
+/** Allow longer model work while keeping the entire response stream cancellable. */
+export const DEFAULT_TIMEOUT_MS = 600_000;
 
 /** Default number of retry attempts for transient errors (total tries = retries + 1). */
 export const DEFAULT_RETRIES = 2;

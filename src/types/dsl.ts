@@ -30,6 +30,20 @@ export interface EdgeStyle {
 export const NODE_TYPES = ['card', 'note'] as const;
 export type NodeType = (typeof NODE_TYPES)[number];
 
+/** Open-ended model-authored content. The host manages identity, not its UI vocabulary. */
+export interface VisualContent {
+  html: string;
+  state?: Record<string, unknown>;
+  height?: number;
+}
+
+export interface VisualReference {
+  nodeId: string;
+  label: string;
+  elementId?: string;
+  selector?: string;
+}
+
 /** Single node on the board */
 export interface BoardNode {
   id: string;
@@ -43,6 +57,7 @@ export interface BoardNode {
   style?: NodeStyle;
   tags?: string[];
   createdBy?: 'user' | 'agent';
+  visual?: VisualContent | null;
 }
 
 /** Visual grouping boundary */
@@ -170,12 +185,21 @@ export type PatchOp =
   | DeleteGroupOp
   | LayoutOp;
 
+/** An explicit next step. Only a trusted host button click submits it. */
+export interface AgentAction {
+  id: string;
+  label: string;
+  prompt: string;
+  nodeIds?: string[];
+}
+
 /** Stable patch format produced by Agent (or mock) */
 export interface DSLPatch {
   type: 'dsl_patch';
   summary: string;
   ops: PatchOp[];
   questions?: string[];
+  actions?: AgentAction[];
 }
 
 export interface InteractionOption {
@@ -220,12 +244,38 @@ export interface ActivityProgressStep {
   timestamp?: number;
 }
 
+export interface AgentProgressEvent {
+  type: 'connected' | 'working' | 'tool' | 'output' | 'heartbeat';
+  message: string;
+  detail?: string;
+  elapsedMs?: number;
+  outputChars?: number;
+  previewTitles?: string[];
+  toolName?: string;
+}
+
+export interface LiveRunProgress {
+  provider: string;
+  request: string;
+  lastSignalAt?: number;
+  lastContentAt?: number;
+  outputChars: number;
+  toolCount: number;
+  latestTool?: string;
+  previewTitles: string[];
+  events: { label: string; timestamp: number }[];
+  retryAttempt?: number;
+}
+
 export interface ActivityEntry {
   id: string;
   timestamp: number;
   kind: 'user_message' | 'agent_patch' | 'validation_error' | 'system' | 'needs_input' | 'run_progress';
   summary: string;
   detail?: string;
+  suggestions?: string[];
+  actions?: AgentAction[];
+  live?: LiveRunProgress;
   runId?: string;
   startedAt?: number;
   completedAt?: number;
@@ -287,6 +337,22 @@ export interface BoardEditEvent {
 
 export type AgentProvider = 'local-cli' | 'claude' | 'openai';
 
+export interface LocalCliInstallation {
+  path: string;
+  realPath: string;
+  version?: string;
+}
+
+export interface LocalCliInfo {
+  id: string;
+  name: string;
+  available: boolean;
+  version?: string;
+  path?: string;
+  realPath?: string;
+  installations?: LocalCliInstallation[];
+}
+
 export interface AgentConfig {
   provider: AgentProvider;
   apiKey?: string;
@@ -295,6 +361,8 @@ export interface AgentConfig {
   cliId?: string;
   /** Custom base URL for OpenAI/OpenAI-compatible APIs */
   baseUrl?: string;
+  /** API response budget. Models and compatible endpoints have different limits. */
+  maxOutputTokens?: number;
 }
 
 // ── Board session types ──
@@ -320,6 +388,13 @@ export interface RunState {
   originalUserMessage: string;
   events: AgentRunEvent[];
   taskPolicy?: AgentTaskPolicy;
+  /** A reviewed proposal remains available after reload or switching boards. */
+  pendingProposal?: {
+    id: string;
+    activityId: string;
+    patch: DSLPatch;
+    baseBoard: BoardDSL;
+  };
 }
 
 export interface BoardHistory {
@@ -331,6 +406,8 @@ export interface BoardHistory {
 export interface BoardSession {
   id: string;
   title: string;
+  /** An unsent conversation draft belongs to this board. */
+  draft?: string;
   board: BoardDSL;
   /** Agent activity log — persisted so history survives page refresh */
   activities?: ActivityEntry[];

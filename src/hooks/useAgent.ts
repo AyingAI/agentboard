@@ -23,10 +23,13 @@ import { LocalCliAdapter } from '../agent/localCliAgent';
 import { OpenAIAgentAdapter } from '../agent/openaiAgent';
 import { normalizePatchForUserIntent } from '../agent/prompts';
 import { isAborted, withRetry } from '../agent/resilience';
-import { applyPatch } from '../engine/patch';
+import { applyVisualPatch as applyPatch, patchConflicts, preserveVisualState } from '../visuals/patch';
+import { advanceLiveProgress, restoreRunActivities } from '../agent/liveProgress';
+import { conversationEvents } from '../agent/conversation';
 import { assessPatchRisk, type PatchRiskAssessment } from '../agent/patchRisk';
 import { summarizePatchChanges, type PatchChangeSummary } from '../agent/patchSummary';
 import { validatePatchPolicy } from '../agent/taskPolicy';
+import { clearPendingProposals, restorePendingProposal } from '../agent/proposals';
 
 export type AppliedAgentPatch = {
   id: string;
@@ -44,6 +47,7 @@ export type PendingAgentPatch = {
   activityId: string;
   patch: DSLPatch;
   risk: PatchRiskAssessment;
+  baseBoard: BoardDSL;
 };
 
 export type InteractionDecision = {
@@ -52,8 +56,9 @@ export type InteractionDecision = {
 };
 
 type UseAgentOptions = {
+  sessionId?: string;
   getRecentEditEvents?: () => BoardEditEvent[];
-  onAgentPatchApplied?: () => void;
+  onAgentPatchApplied?: (patch: DSLPatch, beforeBoard: BoardDSL) => void;
   initialActivities?: ActivityEntry[];
   initialRuns?: Record<string, RunState>;
   /** Called after every state change — use to persist to session storage. */
@@ -82,10 +87,10 @@ function makeActivity(
 }
 
 const RUN_PROGRESS_STEPS = [
-  { id: 'context', label: '读取白板上下文' },
-  { id: 'call', label: '调用 Agent' },
-  { id: 'validate', label: '解析并校验输出' },
-  { id: 'apply', label: '应用结果或等待确认' },
+  { id: 'context', label: '理解需求' },
+  { id: 'call', label: '构建内容' },
+  { id: 'validate', label: '检查内容' },
+  { id: 'apply', label: '整理画布' },
 ] as const;
 
 type RunProgressStepId = (typeof RUN_PROGRESS_STEPS)[number]['id'];
@@ -166,12 +171,13 @@ export function useAgent(
   options: UseAgentOptions = {},
 ) {
   const [isPending, setIsPending] = useState(false);
-  const [lastPatch, setLastPatch] = useState<DSLPatch | null>(null);
-  const [pendingPatch, setPendingPatch] = useState<PendingAgentPatch | null>(null);
+  const [pendingPatch, setPendingPatch] = useState<PendingAgentPatch | null>(() => restorePendingProposal(options.initialRuns ?? {}));
   const [appliedPatch, setAppliedPatch] = useState<AppliedAgentPatch | null>(null);
-  const [activities, setActivities] = useState<ActivityEntry[]>(() => options.initialActivities ?? []);
+  const [activities, setActivities] = useState<ActivityEntry[]>(() => restoreRunActivities(options.initialActivities ?? []));
   const [runs, setRuns] = useState<Record<string, RunState>>(() => options.initialRuns ?? {});
   const abortRef = useRef<AbortController | null>(null);
+  const access = useRef({ getBoard, setBoard, options });
+  access.current = { getBoard, setBoard, options };
   // Use a ref for the callback to avoid stale closures and unnecessary effect re-runs
   const onStateChangeRef = useRef(options.onStateChange);
   onStateChangeRef.current = options.onStateChange;
@@ -185,11 +191,11 @@ export function useAgent(
     if (config.provider === 'local-cli' && config.cliId) {
       return new LocalCliAdapter(config.cliId);
     }
-    if (config.provider === 'claude' && config.apiKey && config.baseUrl?.trim()) {
+    if (config.provider === 'claude' && config.apiKey) {
       return new ClaudeAgentAdapter(config);
     }
-    if (config.provider === 'openai' && config.apiKey && config.baseUrl?.trim()) {
-      return new OpenAIAgentAdapter({ apiKey: config.apiKey, model: config.model, baseUrl: config.baseUrl });
+    if (config.provider === 'openai' && config.apiKey) {
+      return new OpenAIAgentAdapter({ apiKey: config.apiKey, model: config.model, baseUrl: config.baseUrl, maxOutputTokens: config.maxOutputTokens });
     }
     return new NoAgentAdapter();
   }, [config]);
@@ -236,7 +242,8 @@ export function useAgent(
   }, []);
 
   const executeRun = useCallback(
-    async (run: RunState, userMessage: string, resumeActivityId?: string, taskPolicy?: AgentTaskPolicy) => {
+    async (run: RunState, userMessage: string, resumeActivityId?: string, taskPolicy?: AgentTaskPolicy, displayRequest?: string) => {
+      const sessionId = access.current.options.sessionId;
       setIsPending(true);
       const progressActivity = makeActivity(
         'run_progress',
@@ -247,6 +254,7 @@ export function useAgent(
           startedAt: Date.now(),
           progressStatus: 'running',
           progressSteps: makeProgressSteps('context'),
+          live: { provider: providerName, request: displayRequest || run.originalUserMessage, outputChars: 0, toolCount: 0, previewTitles: [], events: [] },
         },
       );
       setActivities((items) => [progressActivity, ...items]);
@@ -254,35 +262,27 @@ export function useAgent(
       const controller = new AbortController();
       abortRef.current = controller;
       const progressLog: string[] = [];
-      let lastOutputUpdate = 0;
-
       const handleAgentProgress = (event: AgentProgressEvent) => {
+        if (controller.signal.aborted || access.current.options.sessionId !== sessionId) return;
         const now = Date.now();
-        if (event.type === 'output' && now - lastOutputUpdate < 350) return;
-        if (event.type === 'output') lastOutputUpdate = now;
-
-        if (event.type === 'tool' || event.type === 'connected' || event.type === 'working') {
-          if (progressLog[progressLog.length - 1] !== event.message) {
-            progressLog.push(event.message);
-            if (progressLog.length > 5) progressLog.shift();
-          }
+        if (event.type !== 'heartbeat' && event.type !== 'output' && progressLog[progressLog.length - 1] !== event.message) {
+          progressLog.push(event.message);
+          if (progressLog.length > 5) progressLog.shift();
         }
-        const detailLines = [
-          ...progressLog,
-          event.type === 'heartbeat' || event.type === 'output' ? event.message : '',
-        ].filter(Boolean);
-        updateRunProgress(progressActivity.id, {
-          summary: `[${providerName}] ${event.message}`,
-          detail: detailLines.join('\n'),
-          activeStepId: 'call',
-        });
+        setActivities(items => items.map(item => item.id === progressActivity.id ? {
+          ...item,
+          summary: event.type === 'heartbeat' ? item.summary : `[${providerName}] ${event.message}`,
+          detail: progressLog.join('\n'),
+          live: item.live ? advanceLiveProgress(item.live, event, now) : item.live,
+          progressSteps: advanceProgressSteps(item.progressSteps, 'call'),
+        } : item));
       };
 
       const request: AgentRequest = {
-        boardState: getBoard(),
+        boardState: access.current.getBoard(),
         userMessage,
         runId: run.id,
-        runContext: run.events,
+        runContext: [...conversationEvents(runs, run.id), ...run.events],
         recentEditEvents: options.getRecentEditEvents?.() ?? [],
         selectedNodeIds: taskPolicy?.selectedNodeIds,
         taskPolicy,
@@ -300,6 +300,8 @@ export function useAgent(
         const response = await withRetry(() => adapter.generateResponse(request), {
           signal: controller.signal,
           onRetry: (attempt, err) => {
+            handleAgentProgress({ type: 'working', message: `连接暂时遇到问题，正在第 ${attempt} 次重试` });
+            setActivities(items => items.map(item => item.id === progressActivity.id && item.live ? { ...item, live: { ...item.live, retryAttempt: attempt, outputChars: 0, toolCount: 0, previewTitles: [], lastContentAt: undefined, latestTool: undefined } } : item));
             const reason = (err as AgentError)?.message ?? '';
             updateRunProgress(progressActivity.id, {
               summary: `[${providerName}] 正在重试第 ${attempt} 次`,
@@ -314,6 +316,8 @@ export function useAgent(
             ]);
           },
         });
+
+        if (controller.signal.aborted || access.current.options.sessionId !== sessionId) return;
 
         updateRunProgress(progressActivity.id, {
           summary: `[${providerName}] 正在解析结果`,
@@ -357,15 +361,18 @@ export function useAgent(
           return;
         }
 
-        const currentBoard = getBoard();
-        const patch = normalizePatchForUserIntent(response, userMessage, currentBoard);
+        const currentBoard = access.current.getBoard();
+        const patch = preserveVisualState(currentBoard, normalizePatchForUserIntent(response, userMessage, currentBoard));
+        if (patchConflicts(request.boardState, currentBoard, patch).length) {
+          throw { code: 'API_ERROR', message: '相关内容在 Agent 工作期间发生了变化，已保留你的编辑。请基于当前状态重新发送。', retryable: false } satisfies AgentError;
+        }
         updateRunProgress(progressActivity.id, {
           summary: `[${providerName}] 正在校验 patch`,
           detail: `已生成 ${patch.ops.length} 个白板修改，正在做结构校验和引用检查。`,
           activeStepId: 'validate',
         });
         const { board: resultBoard, result } = applyPatch(currentBoard, patch);
-        const policyViolations = taskPolicy ? validatePatchPolicy(patch, taskPolicy) : [];
+        const policyViolations = taskPolicy ? validatePatchPolicy(patch, taskPolicy, currentBoard) : [];
         if (policyViolations.length > 0) {
           updateRunProgress(progressActivity.id, {
             summary: `[${providerName}] 修改超出授权范围`,
@@ -386,7 +393,6 @@ export function useAgent(
           ]);
           return;
         }
-        setLastPatch(patch);
 
         if (!result.applied) {
           updateRunProgress(progressActivity.id, {
@@ -416,13 +422,17 @@ export function useAgent(
 
         const risk = assessPatchRisk(patch);
         if (risk.requiresConfirmation) {
-          setPendingPatch({
+          const proposal: PendingAgentPatch = {
             id: `proposal_${Date.now()}_${Math.random().toString(16).slice(2)}`,
             runId: run.id,
             activityId: progressActivity.id,
             patch,
             risk,
-          });
+            baseBoard: currentBoard,
+          };
+          setPendingPatch(proposal);
+          const { risk: _risk, runId: _runId, ...persistedProposal } = proposal;
+          setRuns(previous => ({ ...clearPendingProposals(previous), [run.id]: { ...previous[run.id], pendingProposal: persistedProposal } }));
           updateRunProgress(progressActivity.id, {
             summary: `[${providerName}] 等待确认高风险修改`,
             detail: `已校验 ${result.appliedOps} 个修改，但尚未应用到白板。`,
@@ -433,7 +443,7 @@ export function useAgent(
           return;
         }
 
-        setBoard(resultBoard);
+        if (patch.ops.length) access.current.setBoard(resultBoard);
         setAppliedPatch({
           id: `applied_${Date.now()}_${Math.random().toString(16).slice(2)}`,
           runId: run.id,
@@ -443,7 +453,7 @@ export function useAgent(
           beforeBoard: currentBoard,
           afterBoard: resultBoard,
         });
-        options.onAgentPatchApplied?.();
+        options.onAgentPatchApplied?.(patch, currentBoard);
         const patchEvent: AgentRunEvent = {
           type: 'agent_patch',
           timestamp: Date.now(),
@@ -458,7 +468,7 @@ export function useAgent(
         }));
         setActivities((items) => [
           makeActivity('agent_patch', `[${providerName}] ${patch.summary}`, JSON.stringify(patch.ops, null, 2), {
-            runId: run.id,
+            runId: run.id, suggestions: patch.questions, actions: patch.actions,
           }),
           ...items,
         ]);
@@ -470,6 +480,7 @@ export function useAgent(
           completed: true,
         });
       } catch (err) {
+        if (access.current.options.sessionId !== sessionId) return;
         if (isAborted(err)) {
           updateRunProgress(progressActivity.id, {
             summary: `[${providerName}] 已取消`,
@@ -504,11 +515,13 @@ export function useAgent(
           ),
         ]);
       } finally {
-        abortRef.current = null;
-        setIsPending(false);
+        if (abortRef.current === controller) {
+          abortRef.current = null;
+          setIsPending(false);
+        }
       }
     },
-    [getBoard, setBoard, adapter, providerName, options, updateRunProgress],
+    [getBoard, setBoard, adapter, providerName, options, updateRunProgress, runs],
   );
 
   const cancel = useCallback(() => {
@@ -517,6 +530,8 @@ export function useAgent(
 
   const submitMessage = useCallback(
     async (message: string, displayMessage = message, taskPolicy?: AgentTaskPolicy) => {
+      if (abortRef.current) return;
+      setAppliedPatch(null);
       const runId = makeRunId();
       const userEvent: AgentRunEvent = {
         type: 'user_message',
@@ -539,10 +554,17 @@ export function useAgent(
         ),
         ...items,
       ]);
-      await executeRun(run, message, undefined, taskPolicy);
+      await executeRun(run, message, undefined, taskPolicy, displayMessage);
     },
-    [executeRun],
+    [executeRun, runs],
   );
+
+  const retryRun = useCallback(async (runId: string) => {
+    const run = runs[runId];
+    if (!run || abortRef.current) return;
+    const request = activities.find(item => item.runId === runId && item.kind === 'user_message')?.detail || run.originalUserMessage;
+    await submitMessage(run.originalUserMessage, request, run.taskPolicy);
+  }, [runs, activities, submitMessage]);
 
   const resumeRun = useCallback(
     async (runId: string, decision: InteractionDecision, activityId?: string) => {
@@ -595,6 +617,12 @@ export function useAgent(
   const applyPendingPatch = useCallback(() => {
     if (!pendingPatch) return;
     const currentBoard = getBoard();
+    if (patchConflicts(pendingPatch.baseBoard, currentBoard, pendingPatch.patch).length) {
+      addActivity(makeActivity('validation_error', '提案涉及的内容已改变，未覆盖你的编辑。请让 Agent 基于当前状态重新生成。'));
+      setPendingPatch(null);
+      setRuns(clearPendingProposals);
+      return;
+    }
     const { board: nextBoard, result } = applyPatch(currentBoard, pendingPatch.patch);
     if (!result.applied) {
       setActivities((items) => [
@@ -607,9 +635,11 @@ export function useAgent(
         ...items,
       ]);
       setPendingPatch(null);
+      setRuns(clearPendingProposals);
       return;
     }
     setBoard(nextBoard);
+    setRuns(clearPendingProposals);
     setAppliedPatch({
       id: `applied_${Date.now()}_${Math.random().toString(16).slice(2)}`,
       runId: pendingPatch.runId,
@@ -619,7 +649,7 @@ export function useAgent(
       beforeBoard: currentBoard,
       afterBoard: nextBoard,
     });
-    options.onAgentPatchApplied?.();
+    options.onAgentPatchApplied?.(pendingPatch.patch, currentBoard);
     const patchEvent: AgentRunEvent = {
       type: 'agent_patch',
       timestamp: Date.now(),
@@ -638,7 +668,7 @@ export function useAgent(
         'agent_patch',
         `[${providerName}] 已确认并应用：${pendingPatch.patch.summary}`,
         JSON.stringify(pendingPatch.patch.ops, null, 2),
-        { runId: pendingPatch.runId },
+        { runId: pendingPatch.runId, suggestions: pendingPatch.patch.questions, actions: pendingPatch.patch.actions },
       ),
       ...items,
     ]);
@@ -654,6 +684,7 @@ export function useAgent(
       ...items,
     ]);
     setPendingPatch(null);
+    setRuns(clearPendingProposals);
   }, [pendingPatch, providerName]);
 
   const undoAppliedPatch = useCallback(() => {
@@ -681,30 +712,37 @@ export function useAgent(
     setAppliedPatch(null);
   }, [appliedPatch, getBoard, providerName, setBoard]);
 
+  const reconcilePresentation = useCallback((before: BoardDSL, after: BoardDSL) => {
+    setAppliedPatch(current => current && JSON.stringify(current.afterBoard) === JSON.stringify(before) ? { ...current, afterBoard: after } : current);
+  }, []);
+
   const dismissAppliedPatch = useCallback(() => {
     setAppliedPatch(null);
   }, []);
 
   return {
     isPending,
-    lastPatch,
     pendingPatch,
     appliedPatch,
     activities,
     providerName,
     submitMessage,
+    retryRun,
     resumeRun,
     applyPendingPatch,
     rejectPendingPatch,
     undoAppliedPatch,
     dismissAppliedPatch,
+    reconcilePresentation,
     cancel,
     addActivity,
-    setLastPatch,
     resetState: useCallback((nextActivities: ActivityEntry[], nextRuns: Record<string, RunState>) => {
-      setPendingPatch(null);
+      abortRef.current?.abort({ kind: 'external' });
+      abortRef.current = null;
+      setIsPending(false);
+      setPendingPatch(restorePendingProposal(nextRuns));
       setAppliedPatch(null);
-      setActivities(nextActivities);
+      setActivities(restoreRunActivities(nextActivities));
       setRuns(nextRuns);
     }, []),
   };

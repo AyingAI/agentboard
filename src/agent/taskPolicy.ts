@@ -1,4 +1,4 @@
-import type { AgentTaskPolicy, DSLPatch, PatchOp } from '../types/dsl';
+import type { AgentTaskPolicy, BoardDSL, DSLPatch, PatchOp } from '../types/dsl';
 
 export interface PolicyViolation {
   opIndex: number;
@@ -16,8 +16,10 @@ export function defaultTaskPolicy(selectedNodeIds: string[]): AgentTaskPolicy {
   };
 }
 
-export function validatePatchPolicy(patch: DSLPatch, policy: AgentTaskPolicy): PolicyViolation[] {
+export function validatePatchPolicy(patch: DSLPatch, policy: AgentTaskPolicy, board?: BoardDSL): PolicyViolation[] {
   const selectedIds = new Set(policy.selectedNodeIds);
+  const addedIds = new Set(patch.ops.flatMap(op => op.op === 'add_node' ? [op.node.id] : []));
+  const inScope = (id: string) => selectedIds.has(id) || addedIds.has(id);
   const violations: PolicyViolation[] = [];
 
   patch.ops.forEach((op, opIndex) => {
@@ -34,8 +36,25 @@ export function validatePatchPolicy(patch: DSLPatch, policy: AgentTaskPolicy): P
     }
 
     if (policy.scope === 'selection') {
-      if ((op.op === 'update_node' || op.op === 'delete_node') && !selectedIds.has(op.nodeId)) {
+      if ((op.op === 'update_node' || op.op === 'delete_node') && !inScope(op.nodeId)) {
         violations.push({ opIndex, op: op.op, message: `节点 ${op.nodeId} 不在当前选择范围内。` });
+      }
+      if (op.op === 'add_edge' && (!inScope(op.edge.from) || !inScope(op.edge.to))) {
+        violations.push({ opIndex, op: op.op, message: '连线包含当前选择范围之外的节点。' });
+      }
+      if (op.op === 'delete_edge') {
+        const edge = board?.edges.find(edge => edge.id === op.edgeId)
+          ?? patch.ops.flatMap(item => item.op === 'add_edge' ? [item.edge] : []).find(edge => edge.id === op.edgeId);
+        if (!edge || !inScope(edge.from) || !inScope(edge.to)) violations.push({ opIndex, op: op.op, message: `连线 ${op.edgeId} 不在当前选择范围内。` });
+      }
+      if (op.op === 'add_group' && op.group.nodeIds.some(id => !inScope(id))) {
+        violations.push({ opIndex, op: op.op, message: '新分组包含当前选择范围之外的节点。' });
+      }
+      if (op.op === 'update_group' || op.op === 'delete_group') {
+        const group = board?.groups.find(group => group.id === op.groupId)
+          ?? patch.ops.flatMap(item => item.op === 'add_group' ? [item.group] : []).find(group => group.id === op.groupId);
+        const members = [...(group?.nodeIds ?? []), ...(op.op === 'update_group' ? op.changes.nodeIds ?? [] : [])];
+        if (!group || members.some(id => !inScope(id))) violations.push({ opIndex, op: op.op, message: `分组 ${op.groupId} 不在当前选择范围内。` });
       }
       if (op.op === 'layout' && op.scope === 'all') {
         violations.push({ opIndex, op: op.op, message: '选中节点模式不能应用全图布局。' });

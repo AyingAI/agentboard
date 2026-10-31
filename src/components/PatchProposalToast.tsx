@@ -3,6 +3,7 @@ import type { PendingAgentPatch } from '../hooks/useAgent';
 const REASON_LABELS = {
   delete_node: '删除节点',
   delete_group: '删除分组',
+  delete_edge: '删除连线',
   rewrite_content: '改写现有内容',
   full_board_layout: '重新整理整张白板',
 } as const;
@@ -24,6 +25,7 @@ interface PatchProposalToastProps {
   onApply: () => void;
   onReject: () => void;
   onOpenActivity: () => void;
+  onReview: () => void;
 }
 
 export default function PatchProposalToast({
@@ -31,6 +33,7 @@ export default function PatchProposalToast({
   onApply,
   onReject,
   onOpenActivity,
+  onReview,
 }: PatchProposalToastProps) {
   const operations = Object.entries(proposal.risk.counts)
     .filter(([, count]) => count > 0)
@@ -59,6 +62,7 @@ export default function PatchProposalToast({
       <div className="patch-proposal-counts">{operations.join(' · ')}</div>
 
       <div className="patch-proposal-actions">
+        <button type="button" onClick={onReview}>预览前后变化</button>
         <button type="button" className="patch-proposal-reject" onClick={onReject}>
           放弃修改
         </button>

@@ -18,6 +18,13 @@ export function inferRequestedDeepDiveNodeCount(request: string): number | null 
 }
 
 export function buildNodeDeepDivePrompt(node: BoardNode, request: string): string {
+  if (node.visual) return [
+    '围绕当前视觉继续共创。自由选择最有帮助的内容与交互，不受固定卡片数量或组件类型限制。',
+    `目标节点 ID: ${node.id}`,
+    `目标节点标题: ${node.title}`,
+    `用户需求: ${request}`,
+    '从上下文读取完整 visual.html 与当前 visual.state。优先更新已有视觉，保留用户交互状态与无关内容；需要新表达时可以新增视觉。',
+  ].join('\n');
   const requestedCount = inferRequestedDeepDiveNodeCount(request);
   const countInstruction = requestedCount
     ? [
@@ -25,7 +32,7 @@ export function buildNodeDeepDivePrompt(node: BoardNode, request: string): strin
       '- 为了不挤占操作数预算，不要返回 add_edge；AgentBoard 会在本地自动把每个新增节点用普通 line 连回目标节点。',
     ]
     : [
-      '- 优先围绕这个目标节点新增 1-3 个高价值关联节点。',
+      '- 根据用户目标完成有价值的扩展，自行决定节点数量，也可以创建开放交互视觉。',
       '- 不要返回 add_edge；AgentBoard 会在本地自动把每个新增节点用普通 line 连回目标节点。',
     ];
 

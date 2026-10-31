@@ -3,6 +3,7 @@ import type { DSLPatch, PatchOp } from '../types/dsl';
 export type PatchRiskReason =
   | 'delete_node'
   | 'delete_group'
+  | 'delete_edge'
   | 'rewrite_content'
   | 'full_board_layout';
 
@@ -25,9 +26,11 @@ const EMPTY_COUNTS: Record<PatchOp['op'], number> = {
 };
 
 function rewritesContent(op: PatchOp) {
-  return op.op === 'update_node'
+  return (op.op === 'update_group' && (Object.prototype.hasOwnProperty.call(op.changes, 'title') || Object.prototype.hasOwnProperty.call(op.changes, 'nodeIds')))
+    || op.op === 'update_node'
     && (Object.prototype.hasOwnProperty.call(op.changes, 'title')
-      || Object.prototype.hasOwnProperty.call(op.changes, 'body'));
+      || Object.prototype.hasOwnProperty.call(op.changes, 'body')
+      || Object.prototype.hasOwnProperty.call(op.changes, 'visual'));
 }
 
 export function assessPatchRisk(patch: DSLPatch): PatchRiskAssessment {
@@ -38,6 +41,7 @@ export function assessPatchRisk(patch: DSLPatch): PatchRiskAssessment {
     counts[op.op] += 1;
     if (op.op === 'delete_node') reasons.add('delete_node');
     if (op.op === 'delete_group') reasons.add('delete_group');
+    if (op.op === 'delete_edge') reasons.add('delete_edge');
     if (rewritesContent(op)) reasons.add('rewrite_content');
     if (op.op === 'layout' && op.scope === 'all') reasons.add('full_board_layout');
   }

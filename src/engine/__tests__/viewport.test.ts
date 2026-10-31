@@ -42,3 +42,16 @@ describe('canvas viewport helpers', () => {
     expect(result).toEqual({ panOffset: { x: -100, y: -150 }, zoom: 2 });
   });
 });
+
+it('includes group titles and margins in overview bounds', () => {
+  const grouped = { ...board, groups: [{ id: 'g', title: '阶段一', nodeIds: ['n1'] }] };
+  expect(boardBounds(grouped)?.minY).toBe(48);
+  expect(boardBounds(grouped)?.minX).toBe(72);
+});
+
+it('fits very large boards without clipping at the old minimum zoom', () => {
+  const large = { ...board, nodes: [{ ...board.nodes[0], height: 12000 }] };
+  const view = fitBoardViewport(large, 1200, 800, 40);
+  expect(view.zoom).toBeLessThan(.35);
+  expect(12000 * view.zoom).toBeLessThanOrEqual(720);
+});

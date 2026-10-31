@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { zoomAroundPoint } from '../engine/viewport';
 
-const MIN_ZOOM = 0.35;
+const MIN_ZOOM = 0.05;
 const MAX_ZOOM = 2.4;
 
 function clampZoom(value: number) {
@@ -73,12 +73,14 @@ export function useCanvasPan() {
   );
 
   const handleCanvasWheel = useCallback(
-    (e: React.WheelEvent<HTMLDivElement>) => {
-      if (!e.metaKey && !e.ctrlKey) return;
-
+    (e: WheelEvent) => {
       e.preventDefault();
-
-      const rect = e.currentTarget.getBoundingClientRect();
+      const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? (e.currentTarget as HTMLElement).clientHeight : 1;
+      if (!e.metaKey && !e.ctrlKey) {
+        setPanOffset(current => ({ x: current.x - (e.shiftKey && !e.deltaX ? e.deltaY : e.deltaX) * unit, y: current.y - (e.shiftKey && !e.deltaX ? 0 : e.deltaY) * unit }));
+        return;
+      }
+      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
       const localX = e.clientX - rect.left;
       const localY = e.clientY - rect.top;
       const nextZoom = clampZoom(zoom * Math.exp(-e.deltaY * 0.0015));

@@ -33,10 +33,10 @@ describe('buildNodeDeepDivePrompt', () => {
     expect(prompt).toContain('每个方面应拆成独立节点');
   });
 
-  it('should keep flexible 1-3 node guidance when no exact count is requested', () => {
+  it('leaves expression and scope to the model when no exact count is requested', () => {
     const prompt = buildNodeDeepDivePrompt(targetNode, '补充相关证据');
 
-    expect(prompt).toContain('新增 1-3 个高价值关联节点');
+    expect(prompt).toContain('自行决定节点数量');
     expect(prompt).toContain('不要返回 add_edge');
     expect(prompt).not.toContain('必须返回 3 个 add_node 操作');
   });

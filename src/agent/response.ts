@@ -1,5 +1,6 @@
-import { INTERACTION_KINDS, type DSLPatch, type InteractionOption, type InteractionRequest } from '../types/dsl';
+import { INTERACTION_KINDS, PATCH_OP_TYPES, type AgentAction, type DSLPatch, type InteractionOption, type InteractionRequest } from '../types/dsl';
 import type { AgentResponse } from './types';
+import { visualError } from '../visuals/contract';
 
 export function extractJson(text: string): string {
   return getJsonCandidates(text)[0] ?? text;
@@ -8,11 +9,22 @@ export function extractJson(text: string): string {
 function assertIsDSLPatch(obj: Record<string, unknown>): DSLPatch {
   if (typeof obj.summary !== 'string') throw new Error('Missing or invalid "summary" field');
   if (!Array.isArray(obj.ops)) throw new Error('Missing or invalid "ops" array');
+  for (const raw of obj.ops) {
+    if (!raw || typeof raw !== 'object') throw new Error('Invalid patch operation');
+    const op = raw as Record<string, any>;
+    if (!(PATCH_OP_TYPES as readonly string[]).includes(op.op)) throw new Error(`Unknown patch operation: ${String(op.op)}`);
+    const visual = op.op === 'add_node' ? op.node?.visual : op.op === 'update_node' ? op.changes?.visual : null;
+    if (visual != null) {
+      const error = visualError(visual);
+      if (error) throw new Error(error);
+    }
+  }
   return {
     type: 'dsl_patch',
     summary: obj.summary,
     ops: obj.ops as DSLPatch['ops'],
-    questions: Array.isArray(obj.questions) ? (obj.questions as string[]) : [],
+    ...(Array.isArray(obj.actions) ? { actions: obj.actions.filter((action): action is AgentAction => Boolean(action && typeof action === 'object' && typeof action.id === 'string' && action.id.trim() && typeof action.label === 'string' && action.label.trim() && typeof action.prompt === 'string' && action.prompt.trim() && (action.nodeIds === undefined || Array.isArray(action.nodeIds) && action.nodeIds.every((id: unknown) => typeof id === 'string')))) } : {}),
+    questions: Array.isArray(obj.questions) ? obj.questions.filter((q): q is string => typeof q === 'string') : [],
   };
 }
 
@@ -50,6 +62,10 @@ export function parseAgentResponse(text: string): AgentResponse {
 }
 
 export function findAgentResponseJson(text: string): string | null {
+  // Common streaming case: avoid rescanning every JS/CSS brace inside an unfinished JSON string.
+  if (/^\s*\{\s*"type"\s*:\s*"(?:dsl_patch|interaction_request)"/.test(text)) {
+    try { parseAgentResponseCandidate(text.trim()); return text.trim(); } catch { return null; }
+  }
   for (const candidate of getJsonCandidates(text)) {
     try {
       parseAgentResponseCandidate(candidate);
@@ -125,6 +141,7 @@ function findBalancedJsonObjects(text: string): string[] {
         depth -= 1;
         if (depth === 0) {
           objects.push(text.slice(start, index + 1));
+          start = index;
           break;
         }
       }

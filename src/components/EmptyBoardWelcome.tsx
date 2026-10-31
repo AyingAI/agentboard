@@ -14,6 +14,7 @@ interface EmptyBoardWelcomeProps {
   onOpenConfig: () => void;
   onChooseTask: (prompt: string) => void;
   onCreateCard: () => void;
+  onOpenExample: () => Promise<void>;
 }
 
 export default function EmptyBoardWelcome({
@@ -23,9 +24,12 @@ export default function EmptyBoardWelcome({
   onOpenConfig,
   onChooseTask,
   onCreateCard,
+  onOpenExample,
 }: EmptyBoardWelcomeProps) {
   const [clis, setClis] = useState<AvailableCli[]>([]);
   const [loading, setLoading] = useState(true);
+  const [exampleLoading, setExampleLoading] = useState(false);
+  const [exampleError, setExampleError] = useState('');
   const detectedClis = useMemo(() => availableClis(clis), [clis]);
   const suggestedCli = useMemo(() => recommendedCli(clis), [clis]);
 
@@ -50,9 +54,9 @@ export default function EmptyBoardWelcome({
   return (
     <section className="empty-board-welcome" aria-labelledby="empty-board-title">
       <div className="empty-board-eyebrow">从一次真实共创开始</div>
-      <h1 id="empty-board-title">你描述目标，Agent 把讨论变成可编辑白板</h1>
+      <h1 id="empty-board-title">和 Agent 一起，把想法变成可操作的内容</h1>
       <p className="empty-board-intro">
-        先选一个起点。Agent 创建结构后，你可以移动、改写和连接节点，再让它基于你的修改继续完善。
+        图解、交互推演、可试用的原型——让 Agent 选择表达。你可以直接操作、引用细节，再基于当前状态继续讨论。
       </p>
 
       {!isAgentConfigured ? (
@@ -97,6 +101,14 @@ export default function EmptyBoardWelcome({
         ))}
       </div>
 
+      <div className="visual-example-invitation">
+        <button type="button" disabled={exampleLoading} onClick={async () => {
+          setExampleLoading(true); setExampleError('');
+          try { await onOpenExample(); } catch (error) { setExampleError(error instanceof Error ? error.message : '示例加载失败。'); setExampleLoading(false); }
+        }}>{exampleLoading ? '正在打开…' : '先体验一个交互示例 →'}</button>
+        <span>真实模型生成 · 无需配置 Agent 即可操作</span>
+        {exampleError ? <small role="alert">{exampleError}</small> : null}
+      </div>
       <div className="empty-board-manual">
         想自己开始？
         <button type="button" onClick={onCreateCard}>在画布中央创建卡片</button>

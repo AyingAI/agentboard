@@ -40,4 +40,19 @@ describe('board transfer', () => {
   it('creates a filesystem-safe filename', () => {
     expect(boardExportFilename('架构 / 草稿')).toBe('架构-草稿.agentboard.json');
   });
+
+  it.each([null, [], 12])('rejects non-object imports with a useful error: %j', value => {
+    expect(() => parseBoardImport(JSON.stringify(value))).toThrow('没有找到白板数据');
+  });
+
+  it.each([
+    { nodes: [null] },
+    { groups: [null] },
+    { edges: [null] },
+    { board: { id: 'b', title: 'bad', viewport: { x: 0, y: 0, zoom: 0 } } },
+    { nodes: [{ id: 'n', type: 'card', title: 'bad', body: '', x: 'wrong', y: 0, width: 200, height: 100 }] },
+    { nodes: [{ id: 'n', type: 'card', title: 'bad', body: '', x: 0, y: 0, width: 200, height: 100, tags: 'wrong' }] },
+  ])('rejects malformed content before it can crash the canvas: %j', changes => {
+    expect(() => parseBoardImport(JSON.stringify({ ...board, ...changes }))).toThrow('白板校验失败');
+  });
 });

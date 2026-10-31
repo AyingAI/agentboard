@@ -1,14 +1,8 @@
 import type { AgentConfig, AgentTaskPolicy, BoardDSL, BoardEditEvent, DSLPatch, InteractionRequest, PatchOpType, AgentRunEvent, RunState } from '../types/dsl';
 
-export type AgentProgressEventType = 'connected' | 'working' | 'tool' | 'output' | 'heartbeat';
-
-export interface AgentProgressEvent {
-  type: AgentProgressEventType;
-  message: string;
-  detail?: string;
-  elapsedMs?: number;
-  outputChars?: number;
-}
+export type { AgentProgressEvent } from '../types/dsl';
+import type { AgentProgressEvent } from '../types/dsl';
+export type AgentProgressEventType = AgentProgressEvent['type'];
 
 /** Input to an agent adapter */
 export interface AgentRequest {
