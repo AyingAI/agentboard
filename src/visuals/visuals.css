@@ -58,6 +58,7 @@
 
 .visual-frame { position: relative; min-height: 80px; }
 .visual-frame.is-loading iframe { visibility: hidden; pointer-events: none; }
+.visual-frame.is-preparing iframe { pointer-events: none; }
 .visual-loading { position: absolute; inset: 0; display: flex; gap: 9px; align-items: center; justify-content: center; color: #8a9bb5; background: #f9fbfe; font-size: 11px; }
 .visual-loading > span { width: 9px; height: 9px; border-radius: 3px; background: #c9d8ed; animation: visual-loading-breathe 2s ease-in-out infinite; }
 .visual-expanded .visual-frame { flex: 1; min-height: 0; display: flex; flex-direction: column; }

@@ -2,13 +2,21 @@ import type { BoardDSL, DSLPatch } from '../types/dsl';
 import { applyPatch } from '../engine/patch';
 import { resetContentMinimums, updateContentMinimums } from '../presentation/metrics';
 import { boardVisualErrors } from './contract';
+import { spatialPlanError, spatialNodeIds, withSpatialPlan, withoutSpatialPlan, inferSpatialPlan } from '../presentation/spatialPlan';
 
 /** Extend validation without changing the established atomic patch engine. */
 export function applyVisualPatch(board: BoardDSL, patch: DSLPatch) {
   const outcome = applyPatch(board, resetContentMinimums(board, patch));
   if (!outcome.result.applied) return outcome;
   const errors = boardVisualErrors(outcome.board);
-  return errors.length ? { board, result: { applied: false, errors, appliedOps: 0 } } : { ...outcome, board: updateContentMinimums(outcome.board, patch) };
+  const plan = patch.presentation?.plan;
+  const planError = plan ? patch.presentation?.layout === 'preserve' ? '空间方案使用 auto；需要保留自定义坐标时，请省略 plan。' : spatialPlanError(plan, outcome.board) : null;
+  if (planError) errors.push({ code: 'INVALID_SPATIAL_PLAN', message: planError, refId: 'presentation' });
+  const content = updateContentMinimums(outcome.board, patch);
+  const next = !plan && (patch.presentation?.layout === 'preserve' || patch.ops.some(op => op.op === 'layout')) ? withoutSpatialPlan(content) : content;
+  const complexNewBoard = !board.nodes.length && (next.nodes.length >= 10 || next.nodes.length >= 5 && next.nodes.some(node => node.visual));
+  const inferPlan = !plan && complexNewBoard && patch.presentation?.layout !== 'preserve' && !patch.ops.some(op => op.op === 'layout');
+  return errors.length ? { board, result: { applied: false, errors, appliedOps: 0 } } : { ...outcome, board: plan ? withSpatialPlan(next, plan) : inferPlan ? withSpatialPlan(next, inferSpatialPlan(next), 'local') : next };
 }
 
 /** Preserve user state unless the model explicitly replaces it. */
@@ -28,6 +36,11 @@ export function preserveVisualState(board: BoardDSL, patch: DSLPatch): DSLPatch 
 
 export function patchConflicts(base: BoardDSL, current: BoardDSL, patch: DSLPatch): string[] {
   const conflicts: string[] = [];
+  if (patch.presentation?.plan) {
+    const ids = spatialNodeIds(patch.presentation.plan, base);
+    if (ids.some(id => JSON.stringify(base.nodes.find(node => node.id === id)) !== JSON.stringify(current.nodes.find(node => node.id === id)))
+      || JSON.stringify(base.groups) !== JSON.stringify(current.groups) || JSON.stringify(base.edges) !== JSON.stringify(current.edges)) conflicts.push('spatial-plan');
+  }
   for (const op of patch.ops) {
     if (op.op === 'update_node' || op.op === 'delete_node') {
       const before = base.nodes.find(n => n.id === op.nodeId);

@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type FocusEvent } from 'react';
 import type { ActivityEntry, BoardDSL, BoardNode as BoardNodeType, VisualReference } from '../types/dsl';
 import BoardNode from './BoardNode';
+import BoardOverview from './BoardOverview';
 import EmptyBoardWelcome from './EmptyBoardWelcome';
 import EmptyBoardWorking from './EmptyBoardWorking';
 import type { RenderedNodeSize } from '../presentation/layout';
@@ -29,6 +30,7 @@ interface BoardCanvasProps {
   sessionId: string;
   isSettling: boolean;
   onNodesMeasured: (sessionId: string, sizes: RenderedNodeSize[]) => void;
+  onFocusNodes: (ids: string[]) => void;
   selectedNodeId: string | null;
   selectedNodeIds: string[];
   selectedEdgeId: string | null;
@@ -305,6 +307,7 @@ export default function BoardCanvas({
   sessionId,
   isSettling,
   onNodesMeasured,
+  onFocusNodes,
   selectedNodeId,
   selectedNodeIds,
   selectedEdgeId,
@@ -616,7 +619,7 @@ export default function BoardCanvas({
         </svg>
 
         {/* Group boundaries */}
-        {board.groups.map((group) => {
+        {board.groups.map((group, index) => {
           const nodes = group.nodeIds.map((nid) => nodeMap.get(nid)).filter(Boolean) as BoardNodeType[];
           if (nodes.length === 0) return null;
           const minX = Math.min(...nodes.map((n) => n.x)) - 28;
@@ -624,10 +627,10 @@ export default function BoardCanvas({
           const maxX = Math.max(...nodes.map((n) => n.x + n.width)) + 28;
           const maxY = Math.max(...nodes.map((n) => n.y + n.height)) + 28;
           return (
-            <div key={group.id} className="group-boundary"
+            <div key={group.id} className="group-boundary" data-group-id={group.id}
               style={{ left: minX, top: minY, width: maxX - minX, height: maxY - minY,
                 background: group.style?.fill, borderColor: group.style?.stroke }}>
-              <span>{group.title}</span>
+              <div className="group-heading"><span className="group-number">{String(index + 1).padStart(2, '0')}</span><span className="group-title">{group.title}</span><span className="group-count">{nodes.length} 项内容</span></div>
             </div>
           );
         })}
@@ -677,6 +680,8 @@ export default function BoardCanvas({
           />
         ) : null}
       </div>
+
+      {!isSettling ? <BoardOverview board={board} nodes={nodeMap} zoom={zoom} panOffset={panOffset} onFocus={onFocusNodes} /> : null}
 
       {board.nodes.length === 0 && (isAgentPending ? <EmptyBoardWorking activity={runningActivity} /> : (
         <EmptyBoardWelcome

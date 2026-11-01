@@ -1,0 +1,47 @@
+.spatial-reading-note { display: flex; align-items: center; flex: 0 0 auto; gap: 9px; padding: 2px 22px 12px; min-width: 0; background: #f2f5f9; }
+.spatial-note-mark { font-size: 17px; color: #829ac1; }
+.spatial-reading-note p { margin: 0; color: #536e91; font-size: 12px; line-height: 1.7; }
+.spatial-note-source { margin-left: auto; flex: 0 0 auto; font-size: 9px; color: #9baac0; }
+.semantic-map { overflow: hidden; }
+.semantic-map-content { position: absolute; transform-origin: 0 0; }
+.semantic-region { position: absolute; border: 1px solid #d6e1ef; background: #f8faffbf; border-radius: 16px; pointer-events: none; }
+.semantic-region > span { position: absolute; color: #5e789e; font-weight: 500; }
+.semantic-map-edges { position: absolute; pointer-events: none; overflow: visible; }
+.semantic-map-node { position: absolute; display: flex; flex-direction: column; align-items: stretch; border: 1px solid #d6dfed; background: #fff; color: #334b6c; border-radius: 13px; text-align: left; box-shadow: 0 3px 12px #30476b08; overflow: hidden; cursor: pointer; transition: box-shadow 150ms, background 150ms; }
+.semantic-map-node:hover { border-color: #96b0d4; background: #fbfdff; box-shadow: 0 5px 18px #30476b15; }
+.semantic-map-node.selected { border-color: #789bc6; box-shadow: 0 0 0 3px #789bc329; }
+.semantic-map-node .map-node-kicker { display: flex; align-items: center; gap: 10px; color: #9aabc2; text-transform: uppercase; letter-spacing: .06em; margin-bottom: 8px; font-weight: 500; }
+.semantic-map-node strong { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-weight: 600; color: #3b506f; overflow-wrap: anywhere; }
+.semantic-map-node p { margin: 7px 0 0; color: #607793; font-weight: 400; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; white-space: pre-line; }
+.map-node-open { display: flex; align-items: center; justify-content: space-between; margin-top: auto; padding-top: 7px; font-weight: 400; color: #6480a6; }
+.semantic-map-node.map-tag-decision { background: #f5f2ff; border-color: #d7cff2; }
+.semantic-map-node.map-tag-risk,.semantic-map-node.map-tag-assumption { background: #fff7f1; border-color: #ecd8c8; }
+.semantic-map-node.map-tag-evidence { background: #fffcf4; border-color: #e9dfc8; }
+.semantic-map-node.map-tag-action,.semantic-map-node.map-tag-output { background: #f1faf7; border-color: #cde5dc; }
+.semantic-map-help { position: absolute; bottom: 12px; left: 18px; color: #96a7bf; font-size: 10px; pointer-events: none; background: #f2f5f9d9; padding: 4px 7px; border-radius: 5px; }
+.semantic-map-help > span { margin: 0 5px; }
+.canvas-view-toggle { display: flex; gap: 2px; border: 1px solid #dce5f1; border-radius: 8px; background: #eaf0f7; padding: 2px; flex: 0 0 auto; }
+.canvas-view-toggle button { background: transparent; border: 0; border-radius: 5px; padding: 5px 9px; min-height: 26px; color: #94a4ba; font-size: 10px; font-weight: 400; }
+.canvas-view-toggle button[aria-pressed="true"] { background: white; color: #5a769d; box-shadow: 0 1px 3px #28486c0b; }
+.map-node-detail { border: 1px solid #d8e2ef; border-radius: 18px; padding: 0; width: min(960px, calc(100vw - 40px)); max-height: calc(100dvh - 64px); color: #3b506f; box-shadow: 0 22px 90px #263b6426; overflow: auto; }
+.map-node-detail::backdrop { background: #2a3c5b33; backdrop-filter: blur(3px); }
+.map-detail-heading { position: sticky; top: 0; z-index: 2; display: flex; align-items: flex-start; justify-content: space-between; padding: 22px 26px 18px; background: #fff; border-bottom: 1px solid #e8edf5; gap: 14px; }
+.map-detail-heading span { display: block; color: #9aaac0; font-size: 10px; margin-bottom: 6px; }
+.map-detail-heading h2 { font-size: 18px; margin: 0; line-height: 1.5; }
+.map-detail-heading > button { flex: 0 0 auto; width: 30px; height: 30px; padding: 0; border: 1px solid #e0e7f1; background: #f8fafe; color: #879bb6; font-size: 20px; border-radius: 8px; }
+.map-detail-content { padding: 18px 26px 24px; }
+.map-detail-body { color: #5e7493; font-size: 14px; line-height: 1.9; white-space: pre-wrap; margin: 0 0 18px; }
+.map-detail-content .visual-surface { margin-top: 0; }
+.map-detail-footer { position: sticky; bottom: 0; background: #fcfdff; border-top: 1px solid #e8edf5; padding: 13px 24px; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.map-detail-footer button { background: transparent; border: 0; font-size: 11px; color: #92a3bc; padding: 7px 9px; border-radius: 7px; }
+.map-detail-footer .map-detail-discuss { color: #5878a3; background: #edf3fc; border: 1px solid #dbe7f7; }
+@media(max-width: 1100px) { .canvas-header { flex-wrap: wrap; } .canvas-header .canvas-navigator { margin-left: auto; } .spatial-note-source { display: none; } }
+@media(max-width: 600px) { .spatial-reading-note { padding: 0 12px 8px; } .spatial-reading-note p { font-size: 10px; } .canvas-view-toggle { margin-left: auto; } .map-node-detail { width: calc(100vw - 18px); max-height: calc(100dvh - 32px); border-radius: 14px; } .map-detail-content { padding: 14px; } .map-detail-heading { padding: 16px; } .map-detail-heading h2 { font-size: 16px; } .map-detail-footer { padding: 10px; } }
+@media(prefers-reduced-motion: reduce) { .semantic-map-node { transition: none; } }
+.spatial-layout-actions { position: relative; display: flex; align-items: center; }
+.canvas-header .spatial-layout-actions .layout-more-button { min-width: 18px; padding: 0 3px; font-size: 12px; color: #94a7c3; }
+.layout-actions-popover { position: absolute; z-index: 45; top: calc(100% + 8px); left: 0; width: 240px; padding: 5px; border: 1px solid #dbe4f0; border-radius: 10px; background: #fff; box-shadow: 0 10px 30px #293f6315; }
+.canvas-header .layout-actions-popover > button { display: block; width: 100%; text-align: left; padding: 10px 11px; font-size: 12px; color: #5c7395; }
+.layout-actions-popover small { display: block; margin-top: 5px; color: #9babc1; font-size: 10px; font-weight: 400; }
+.map-detail-content iframe { max-height: min(55vh, 650px); }
+.spatial-reading-note p { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }

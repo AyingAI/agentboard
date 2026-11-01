@@ -78,9 +78,11 @@ test('rendered content and group bounds never overlap, overview fits and navigat
   const ops = [...nodes.map(node => ({ op: 'add_node', node })), ...groups.map(group => ({ op: 'add_group', group }))];
   await answer(page, patch(ops, { actions: [{ id: 'compare', label: '继续比较关键方向', prompt: '基于当前证据比较关键方向。' }] }));
   await start(page); await submit(page, '展开产品方向');
+  await expect(page.locator('.semantic-map-node')).toHaveCount(14);
+  await page.getByRole('button', { name: '内容', exact: true }).click();
   await expect(page.locator('.board-node')).toHaveCount(14);
   await expect.poll(() => overlapCount(page)).toBe(0);
-  expect(Number((await page.locator('.canvas-zoom-value').innerText()).replace('%', ''))).toBeGreaterThanOrEqual(80);
+  await expect.poll(async () => Number((await page.locator('.canvas-zoom-value').innerText()).replace('%', ''))).toBeGreaterThanOrEqual(80);
   await dockIsClear(page);
   await page.screenshot({ animations: 'disabled', path: 'docs/verification/canvas-v033-reading.png' });
   await page.getByRole('button', { name: '总览', exact: true }).click();

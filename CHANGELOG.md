@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.3.7 — 2026-11-01
+
+**Layout now helps explain content.** This release includes the automatic composition work recorded under 0.3.6, which was a development milestone rather than a separate GitHub release.
+
+- Replace the main organize action with model-assisted “智能布局”. It reads titles, complete bodies, visible visual text, current state, groups, existing edges and measured sizes, then proposes a composable spatial plan. An explicit layout-only task can return a plan without content operations; host policy rejects additions, rewrites and deletions, and conflict detection protects edits made while planning.
+- Add optional `presentation.plan` to the shared patch contract: a public description and recursively composed node/group references in rows, columns and orbits. Models can express comparisons, arguments, hierarchies and multi-stage structures without a fixed whole-board template. Keep custom coordinates through `layout: "preserve"`.
+- Use the same semantic structure for measured full-content geometry and a compact structure view. New multi-part generations can provide the plan in the same response. Complex new boards without one get a local fallback based on explicit groups, tags and relationships; the interface distinguishes that source from an agent-authored plan.
+- Add structure/content view controls, scale-aware map labels, relationship routing, region headings, content search/focus and responsive framing. Readable structure no longer requires rendering every long card as a vertical document.
+- Open original content in a focused detail dialog, with working visuals, preserved state, element references and direct discussion. Return to the map or locate the node in the editable content canvas. Keep the spacing-only command in the layout menu.
+- Include semantic layout changes in the original undo transaction, retain drafts, preserve manual placement, and avoid stale plans or old map structures overriding explicit spatial layouts. Add unit/browser coverage for comparisons, arguments, flows, state restoration, permissions, reloads and concurrent edits; verify one real Pi spatial-planning call against a previously generated board.
+- Wait for the sandbox's revealed frame to finish painting before enabling interaction, preventing occasional lost first clicks immediately after external scripts load.
+- Update both READMEs with the new structure/content workflow, smart-layout and spacing controls, spatial protocol, public interface example and opt-in live tests. Release validation: 238 unit tests passed, 58 browser tests passed, 4 live CLI tests skipped by default, production build passed; one separate real Pi spatial-planning call passed.
+
+## 0.3.6 — 2026-11-01
+
+- Add automatic section composition after DOM measurement: arrange large visuals beside their supporting notes, pack small cards in reading rows, align sections within a bounded page width, and leave actual-height clearance between sections.
+- Use directional layers for flow boards, including branches and deterministic cycle handling. Honor explicit mindmap, matrix, timeline, swimlane, horizontal and vertical layouts using measured dimensions, including changed-only layout hints in a generation patch.
+- Let models retain arbitrary spatial meaning through optional `presentation: { layout: "preserve" }`, beyond named algorithms. This retains coordinates with collision clearance and does not broaden modification permissions.
+- Reflow automatically composed boards as content grows, keeping their established page width across follow-ups. Manual dragging/resizing opts out of global reflow; subsequent additions preserve existing positions. Keep model HTML, visual state, group membership and edge meaning intact.
+- Repair clearly sparse legacy group staircases once with an undo entry. Explicit “整理布局” now recomposes the board instead of only pushing collisions downward. Agent presentation corrections remain in the agent's original undo transaction.
+- Add numbered section headings and a section reading bar. At overview scale, show readable section labels in screen coordinates; clicking a label returns to the section's reading view.
+- Add geometry and browser regression coverage for mixed visual boards, measured content growth, branching flows, explicit spatial intent, manual placements, reloads and undo, plus an opt-in real CLI composition check.
+
 The 0.3.0–0.3.4 entries below record development milestones included in v0.3.5, rather than separate GitHub releases.
 
 ## 0.3.5 — 2026-10-31
@@ -91,4 +114,11 @@ To verify direct next-step actions with a real installed CLI:
 
 ```bash
 AGENTBOARD_LIVE_ACTIONS=pi npm run test:e2e -- e2e/live-actions.spec.ts --workers=1
+```
+
+To verify measured composition or content-aware spatial planning with a real CLI:
+
+```bash
+AGENTBOARD_LIVE_COMPOSITION=pi npm run test:e2e -- e2e/board-composition.spec.ts -g "a real CLI" --workers=1
+AGENTBOARD_LIVE_SPATIAL=pi npm run test:e2e -- e2e/semantic-layout.spec.ts -g "real CLI" --workers=1
 ```

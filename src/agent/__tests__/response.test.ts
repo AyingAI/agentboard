@@ -11,6 +11,18 @@ function patchJson(summary = 'ok') {
 }
 
 describe('parseAgentResponse', () => {
+  it('retains a nested semantic layout and rejects ambiguous ownership', () => {
+    const plan = { description: '证据与风险围绕判断', root: { direction: 'row', children: [{ nodeId: 'evidence' }, { direction: 'column', children: [{ nodeId: 'decision' }, { groupId: 'next', direction: 'row' }] }, { nodeId: 'risk' }] } };
+    const response = parseAgentResponse(JSON.stringify({ type: 'dsl_patch', summary: '', ops: [], presentation: { layout: 'auto', plan } }));
+    if (response.type === 'dsl_patch') expect(response.presentation?.plan).toEqual(plan);
+    expect(() => parseAgentResponse(JSON.stringify({ type: 'dsl_patch', summary: '', ops: [], presentation: { layout: 'auto', plan: { description: 'bad', root: { nodeId: 'x', children: [] } } } }))).toThrow();
+  });
+  it('retains a typed optional presentation hint without fabricating operations', () => {
+    const response = parseAgentResponse(JSON.stringify({ type: 'dsl_patch', summary: '保留有意义的空间关系', ops: [], presentation: { layout: 'preserve' } }));
+    expect(response.type).toBe('dsl_patch');
+    if (response.type === 'dsl_patch') { expect(response.presentation).toEqual({ layout: 'preserve' }); expect(response.ops).toEqual([]); }
+    expect(() => parseAgentResponse(JSON.stringify({ type: 'dsl_patch', summary: '', ops: [], presentation: { layout: 'unknown' } }))).toThrow('Invalid presentation.layout');
+  });
   it('parses a fenced JSON patch with surrounding prose', () => {
     const response = parseAgentResponse([
       '下面是结构化结果：',

@@ -8,7 +8,12 @@ import { useDrag } from './hooks/useDrag';
 import { useDismissibleLayer } from './hooks/useDismissibleLayer';
 import { useBoardPresentation } from './hooks/useBoardPresentation';
 import CanvasNavigator from './components/CanvasNavigator';
+import SectionNavigator from './components/SectionNavigator';
+import { composeMeasuredBoard, hasManagedComposition } from './presentation/composition';
 import { arrangeMeasuredBoard } from './presentation/layout';
+import { inferSpatialPlan, readSpatialPlan, withSpatialPlan } from './presentation/spatialPlan';
+import SemanticMap, { type SemanticMapHandle } from './components/SemanticMap';
+import MapNodeDetail from './components/MapNodeDetail';
 import { canvasReadingSize } from './presentation/viewport';
 import { useCanvasPan } from './hooks/useCanvasPan';
 import { useEdgeCreation } from './hooks/useEdgeCreation';
@@ -30,6 +35,7 @@ import StorageRecoveryToast from './components/StorageRecoveryToast';
 import PatchReview from './components/PatchReview';
 import './visuals/visuals.css';
 import './components/composer.css';
+import './components/semanticMap.css';
 import { defaultTaskPolicy } from './agent/taskPolicy';
 import { fitBoardViewport } from './engine/viewport';
 import { boardExportFilename, createBoardExport, parseBoardImport } from './engine/boardTransfer';
@@ -81,6 +87,12 @@ export default function App() {
   } = useBoardSessions();
 
   const board = activeSession.board;
+  const [viewChoice, setViewChoice] = useState<{ sessionId: string; mode: 'structure' | 'content' } | null>(null);
+  const [mapDetailId, setMapDetailId] = useState<string | null>(null);
+  const mapRef = useRef<SemanticMapHandle>(null);
+  const structureView = board.nodes.length > 1 && (viewChoice?.sessionId === activeId ? viewChoice.mode === 'structure'
+    : !!readSpatialPlan(board) && !(board.metadata['agentboard.presentation'] as { freePlacement?: boolean } | undefined)?.freePlacement
+      && (hasManagedComposition(board) || !(board.metadata['agentboard.presentation'] as { composition?: unknown } | undefined)?.composition));
 
   // ── Agent config ──
   const { config, setApiKey, setModel, setProvider, setCliId, setBaseUrl, setMaxOutputTokens } = useAgentConfig();
@@ -277,8 +289,24 @@ export default function App() {
   const presentation = useBoardPresentation({
     sessionId: activeId, getBoard, boardRef, setViewport, reconcile: reconcilePresentation,
     commit: next => { currentBoardRef.current = next; updateActiveBoard(next); },
+    commitRepair: updateBoardWithHistory,
+    suspendViewport: structureView,
   });
-  presentationNotifier.current = presentation.request;
+  presentationNotifier.current = (patch, before) => {
+    presentation.request(patch, before);
+    if (patch.presentation?.plan) setViewChoice({ sessionId: activeId, mode: 'structure' });
+    else if (patch.presentation?.layout === 'preserve' || patch.ops.some(op => op.op === 'layout')) setViewChoice({ sessionId: activeId, mode: 'content' });
+  };
+  const showStructure = structureView && !presentation.isSettling;
+  const previousStructureView = useRef(structureView);
+  useLayoutEffect(() => {
+    if (previousStructureView.current && !structureView) presentation.focus();
+    previousStructureView.current = structureView;
+  }, [structureView, presentation.focus]);
+  function focusCanvas(ids?: string[]) {
+    if (showStructure) mapRef.current?.focus(ids ?? []);
+    else presentation.focus(ids);
+  }
 
   // Reset in-memory agent state when session switches
   const prevActiveIdRef = useRef(activeId);
@@ -329,6 +357,7 @@ export default function App() {
   const pendingInteraction = pendingInteractions[0] ?? null;
 
   useEffect(() => {
+    setMapDetailId(null);
     setVisualReference(null); setReviewOpen(false);
     selectNodes([]); setSelectedEdgeId(null); setEditState(null); setEdgeEditState(null);
     setDeepDiveNodeId(null); setDeepDiveInput(''); setRecentEditEvents([]);
@@ -632,6 +661,22 @@ export default function App() {
   }
 
   function createNodeAtViewportCenter() {
+    if (showStructure) {
+      const current = getBoard();
+      const anchor = current.nodes.find(node => node.id === selectedNodeId) ?? current.nodes[0];
+      const x = anchor ? anchor.x + anchor.width + 64 : 80;
+      let y = anchor?.y ?? 80;
+      for (let pass = 0; pass <= current.nodes.length; pass++) {
+        const occupied = current.nodes.filter(node => x < node.x + node.width + 32 && x + 272 > node.x && y < node.y + node.height + 32 && y + 132 > node.y);
+        if (!occupied.length) break;
+        y = Math.max(...occupied.map(node => node.y + node.height + 32));
+      }
+      setViewChoice({ sessionId: activeId, mode: 'content' });
+      handleCanvasDoubleClick(x + 120, y + 25);
+      const nodes = getBoard().nodes, id = nodes[nodes.length - 1].id;
+      requestAnimationFrame(() => presentation.focus([id]));
+      return;
+    }
     const rect = boardRef.current?.getBoundingClientRect();
     if (!rect) return;
     handleCanvasDoubleClick(
@@ -641,6 +686,7 @@ export default function App() {
   }
 
   function fitBoardToViewport() {
+    if (showStructure) { mapRef.current?.fit(); return; }
     const rect = boardRef.current ? canvasReadingSize(boardRef.current) : null;
     if (!rect) return;
     setViewport(fitBoardViewport(presentation.getMeasuredBoard(), rect.width, rect.height, 32));
@@ -649,7 +695,21 @@ export default function App() {
   function organizeBoard() {
     const next = arrangeMeasuredBoard(getBoard(), presentation.getMeasurements());
     updateBoardWithHistory(next);
+    setViewChoice({ sessionId: activeId, mode: 'content' });
     requestAnimationFrame(() => presentation.focus());
+  }
+
+  function organizeIntelligently() {
+    if (isPending || !board.nodes.length) return;
+    if (!isAgentConfigured) {
+      const next = withSpatialPlan(getBoard(), inferSpatialPlan(getBoard()), 'local');
+      updateBoardWithHistory(composeMeasuredBoard(next, presentation.getMeasurements()));
+      setViewChoice({ sessionId: activeId, mode: 'structure' });
+      return;
+    }
+    void submitMessage('请理解当前白板的实际内容，为它设计一个帮助理解的空间结构：识别核心问题、结论、比较对象、证据、风险、步骤与依赖。让并列内容可以直接比较，让支持与质疑靠近对应判断，让流程有清楚方向，避免把所有板块排成一条长列。组合空间关系，不修改任何内容、分组、连线或交互代码。只返回 ops: [] 与 presentation.plan。', '根据内容智能布局', {
+      scope: 'board', selectedNodeIds: [], allowExistingEdits: false, allowDelete: false, allowFullBoardLayout: true, layoutOnly: true,
+    });
   }
 
   function executeAction(action: AgentAction, sourceIds: string[] = []) {
@@ -951,16 +1011,28 @@ export default function App() {
             onZoomOut={() => zoomCanvas(1 / 1.2)}
             onResetView={() => { const rect = boardRef.current?.getBoundingClientRect(); if (rect) zoomAt(1, { x: rect.width / 2, y: rect.height / 2 }); }}
             onFitContent={fitBoardToViewport}
-            onReadContent={() => presentation.focus(selectedNodeIds)}
-            onOrganize={organizeBoard}
+            onReadContent={() => {
+              if (showStructure && selectedNodeId) { setMapDetailId(selectedNodeId); return; }
+              if (showStructure) { setViewChoice({ sessionId: activeId, mode: 'content' }); return; }
+              presentation.focus(selectedNodeIds);
+            }}
+            onOrganize={organizeIntelligently}
+            onOrganizeSpacing={organizeBoard}
+            isOrganizing={isPending}
             onOpenShortcuts={() => setShowShortcutHelp(true)}
           />
-            {board.nodes.length ? <CanvasNavigator board={board} selectedId={selectedNodeId} onFocus={id => { selectNodes([id]); presentation.focus([id]); }} /> : null}
+            {board.nodes.length > 1 ? <div className="canvas-view-toggle" aria-label="白板视图"><button type="button" aria-pressed={structureView} onClick={() => setViewChoice({ sessionId: activeId, mode: 'structure' })}>结构</button><button type="button" aria-pressed={!structureView} onClick={() => { setViewChoice({ sessionId: activeId, mode: 'content' }); requestAnimationFrame(() => presentation.focus()); }}>内容</button></div> : null}
+            {board.nodes.length ? <CanvasNavigator board={board} selectedId={selectedNodeId} onFocus={id => { selectNodes([id]); focusCanvas([id]); }} /> : null}
           </div>
+          {showStructure ? <SemanticMap ref={mapRef} board={board} boardRef={boardRef} zoom={zoom} panOffset={panOffset} selectedIds={selectedNodeIds}
+            isSpaceHeld={isSpaceHeld} isPanning={isPanning} setViewport={setViewport} onPointerDown={handleCanvasPointerDown} onWheel={handleCanvasWheel}
+            onDeselect={() => { selectNodes([]); setSelectedEdgeId(null); }} onOpen={id => { selectNodes([id]); setSelectedEdgeId(null); setMapDetailId(id); }} /> : <>
+          <SectionNavigator board={board} selectedNodeIds={selectedNodeIds} onFocus={ids => { selectNodes([]); focusCanvas(ids); }} />
           <BoardCanvas
             board={board}
             sessionId={activeId}
             onNodesMeasured={presentation.onNodesMeasured}
+            onFocusNodes={ids => { selectNodes([]); presentation.focus(ids); }}
             isSettling={presentation.isSettling}
             selectedNodeId={selectedNodeId}
             selectedNodeIds={selectedNodeIds}
@@ -1042,9 +1114,7 @@ export default function App() {
               });
             }}
           />
-
-
-
+          </>}
           {recovery ? (
             <StorageRecoveryToast
               message={recovery.message}
@@ -1136,6 +1206,10 @@ export default function App() {
           />
         ) : null}
       </main>
+      {showStructure && mapDetailId && board.nodes.some(node => node.id === mapDetailId) ? <MapNodeDetail key={`${activeId}-${mapDetailId}`} node={board.nodes.find(node => node.id === mapDetailId)!}
+        onClose={() => setMapDetailId(null)} onStateChange={updateVisualState} onReference={referenceVisual} onAsk={discussVisual}
+        onDiscuss={() => { selectNodes([mapDetailId]); setMapDetailId(null); requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>('.prompt-bar textarea')?.focus()); }}
+        onShowOnCanvas={() => { const id = mapDetailId; setMapDetailId(null); setViewChoice({ sessionId: activeId, mode: 'content' }); requestAnimationFrame(() => presentation.focus([id])); }} /> : null}
       {reviewOpen && pendingPatch ? <PatchReview proposal={pendingPatch} onClose={() => setReviewOpen(false)}
         onApply={() => { applyPendingPatch(); setReviewOpen(false); }} /> : null}
 

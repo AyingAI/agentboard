@@ -1,4 +1,5 @@
-import type { BoardDSL, BoardNode } from '../types/dsl';
+import type { BoardDSL, BoardNode, LayoutAlgorithm } from '../types/dsl';
+import { applyPatch } from '../engine/patch';
 import { intrinsicHeights, withIntrinsicHeights } from './metrics';
 
 export interface RenderedNodeSize { id: string; width: number; height: number }
@@ -70,4 +71,20 @@ export function arrangeMeasuredBoard(board: BoardDSL, sizes: RenderedNodeSize[],
     changed = true; return after;
   });
   return changed ? withIntrinsicHeights({ ...board, nodes: result }, minimums) : board;
+}
+
+/** Apply an explicit spatial pattern to its measured selection, without changing other objects. */
+export function arrangeSpatialBoard(board: BoardDSL, sizes: RenderedNodeSize[], algorithm: LayoutAlgorithm, movableIds?: ReadonlySet<string>): BoardDSL {
+  const ids = movableIds ?? new Set(board.nodes.map(node => node.id));
+  const measured = new Map(sizes.map(size => [size.id, size]));
+  const subset: BoardDSL = { ...board,
+    nodes: board.nodes.filter(node => ids.has(node.id)).map(node => ({ ...node, height: Math.max(node.height, measured.get(node.id)?.height ?? node.height) })),
+    edges: board.edges.filter(edge => ids.has(edge.from) && ids.has(edge.to)),
+    groups: board.groups.map(group => ({ ...group, nodeIds: group.nodeIds.filter(id => ids.has(id)) })).filter(group => group.nodeIds.length),
+  };
+  if (!subset.nodes.length) return arrangeMeasuredBoard(board, sizes, movableIds);
+  const laidOut = applyPatch(subset, { type: 'dsl_patch', summary: '', ops: [{ op: 'layout', algorithm, scope: 'all' }] });
+  if (!laidOut.result.applied) return arrangeMeasuredBoard(board, sizes, movableIds);
+  const positions = new Map(laidOut.board.nodes.map(node => [node.id, { x: node.x, y: node.y }]));
+  return arrangeMeasuredBoard(board, sizes, movableIds, positions);
 }

@@ -16,19 +16,20 @@ export default function PatchResultToast({ result, onUndo, onDismiss, onOpenActi
   const [expanded, setExpanded] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const actions = followUpActions(result.patch);
+  const changed = result.patch.ops.length > 0 || !!result.patch.presentation?.plan;
   useEffect(() => { setExpanded(false); setSubmitted(false); }, [result.id]);
   useEffect(() => {
-    if (!result.patch.ops.length || actions.length) return;
+    if (!changed || actions.length) return;
     const timer = window.setTimeout(onDismiss, 12000);
     return () => window.clearTimeout(timer);
   }, [onDismiss, result.id]);
   const summary = result.patch.summary.replace(/\*\*/g, '').trim();
   return <section className="patch-result-toast" aria-label="Agent 修改已完成">
-    <div className="result-topline"><span className="result-done"><span aria-hidden="true">✓</span>{result.patch.ops.length ? '画布已更新' : 'Agent 的回复'}</span>
+    <div className="result-topline"><span className="result-done"><span aria-hidden="true">✓</span>{changed ? '画布已更新' : 'Agent 的回复'}</span>
       <div className="result-utilities">
-        {result.patch.ops.length ? <button type="button" onClick={onLocate}>定位结果 <span aria-hidden="true">↗</span></button> : null}
+        {changed ? <button type="button" onClick={onLocate}>定位结果 <span aria-hidden="true">↗</span></button> : null}
         <button type="button" onClick={onOpenActivity}>记录</button>
-        {result.patch.ops.length ? <button type="button" onClick={onUndo}>撤销</button> : null}
+        {changed ? <button type="button" onClick={onUndo}>撤销</button> : null}
         <button type="button" onClick={onDismiss} aria-label="关闭完成提示" className="result-dismiss">×</button>
       </div>
     </div>

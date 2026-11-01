@@ -1,6 +1,7 @@
 import type { BoardDSL, DSLPatch } from '../types/dsl';
 
-const KEY = 'agentboard.presentation';
+export const PRESENTATION_KEY = 'agentboard.presentation';
+const KEY = PRESENTATION_KEY;
 export function intrinsicHeights(board: BoardDSL): Record<string, number> {
   const stored = (board.metadata[KEY] as { minHeights?: Record<string, unknown> } | undefined)?.minHeights;
   if (!stored || typeof stored !== 'object') return Object.create(null);
@@ -9,7 +10,7 @@ export function intrinsicHeights(board: BoardDSL): Record<string, number> {
 export function withIntrinsicHeights(board: BoardDSL, heights: Record<string, number>): BoardDSL {
   const valid = Object.fromEntries(Object.entries(heights).filter(([id]) => board.nodes.some(node => node.id === id)));
   if (!Object.keys(valid).length && !board.metadata[KEY]) return board;
-  return { ...board, metadata: { ...board.metadata, [KEY]: { minHeights: valid } } };
+  return { ...board, metadata: { ...board.metadata, [KEY]: { ...(board.metadata[KEY] as object), minHeights: valid } } };
 }
 /** Measured height is geometry, not a new permanent content minimum. */
 export function resetContentMinimums(board: BoardDSL, patch: DSLPatch): DSLPatch {

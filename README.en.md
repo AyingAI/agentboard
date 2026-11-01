@@ -1,16 +1,29 @@
 # AgentBoard
 
-**Generate interactive visualizations from natural language and keep creating with AI on the same canvas.**
+**Think with AI on the same canvas, with content you can understand, operate and keep evolving.**
 
-AgentBoard is a local-first visual collaboration canvas. Describe a question or an idea, let an agent create diagrams, interactive charts, simulations or runnable prototypes, then interact with the result and continue refining it together.
+AgentBoard is a local-first visual collaboration canvas. Describe a question or an idea, let an agent create diagrams, interactive charts, simulations or runnable prototypes, then explore the relationships, operate the details and continue refining them together. Models choose how to express ideas; the canvas provides presentation, interaction and reviewable collaboration.
 
-[中文](./README.md) · [v0.3.5 changelog](./CHANGELOG.md) · [Contributing](./CONTRIBUTING.md)
+[中文](./README.md) · [Changelog](./CHANGELOG.md) · [Contributing](./CONTRIBUTING.md)
 
 ![AgentBoard cover](./assets/agentboard-cover.png)
 
-## The core addition in v0.3.5: interactive visualization
+## v0.3.7: layout that helps explain content
 
-This release adds open-ended visual generation and execution. Agents can use HTML, SVG and JavaScript to turn a conversation into canvas content that users can inspect, operate and refine.
+Choose “智能布局” to ask the configured agent to read actual board content, visual state, groups and connections, then organize meaningful spatial relationships. Compare alternatives side by side, connect evidence to a decision, and give risks and next steps their own place. New generations can return a spatial plan in the same response.
+
+- **Organize by meaning:** recursively compose rows, columns and orbits to express comparisons, arguments, hierarchies and flows. The host lays out measured content; models can also preserve custom coordinates.
+- **Explore structure, then detail:** the structure view shows summaries and existing relationships. Open a node to read its original text or operate its original visual; switch to the content canvas for editing and dragging.
+- **Keep layout changes focused:** clicking smart layout authorizes spatial organization. Host policy rejects content additions, rewrites and deletions in this task, retains visual source and parameters, supports undo and checks for edits made while planning.
+- **Keep quick cleanup available:** “仅整理间距” adjusts spacing and collisions. Without an agent, smart layout uses clearly labeled local rules based on existing groups, connections and tags.
+
+![AgentBoard v0.3.7 structure view](./assets/agentboard-semantic-layout.png)
+
+An example scenario from browser regression tests: evidence on the left supports the central decision, risk on the right constrains it, and the next action follows below. Every node opens its original content.
+
+## Open interactive visualization
+
+Agents can use HTML, SVG and JavaScript to turn a conversation into canvas content that users can inspect, operate and refine.
 
 - **Generate visualizations:** describe a problem and let the agent choose a diagram, interactive chart, explainer, simulation or runnable prototype.
 - **Interact directly:** adjust parameters, switch conditions and observe results. Interaction state persists with the board across reloads and expansion.
@@ -40,12 +53,20 @@ Open the local URL printed in the terminal, normally `http://127.0.0.1:5173`.
 - **Connect an agent:** open settings and select an installed, authenticated local CLI, or configure Claude / an OpenAI-compatible API.
 - **Start collaborating:** choose a starter task or activate the floating input strip. Select existing content to focus the next discussion on it.
 
+To update an existing checkout and restart:
+
+```bash
+git pull --ff-only
+npm ci
+npm run dev -- --host 127.0.0.1
+```
+
 ## Supporting experience improvements
 
 - **More canvas space:** the centered floating composer starts as a compact strip, expands on activation and collapses when empty and dismissed. Both sides of the canvas remain usable. Stop a run or write the next draft while waiting.
 - **Continuity:** boards keep separate drafts, run records and pending proposals across reloads and board switches. One-click next steps execute without replacing an unsent draft.
-- **Reviewable changes:** low-risk additions apply directly; content rewrites, node/edge/group deletion and full-board layouts require confirmation. Compare versions and protect later human edits from stale proposals.
-- **Readable large boards:** measured card dimensions drive collision avoidance. Reading view, overview, content navigation and wheel panning help explore larger boards.
+- **Reviewable changes:** low-risk additions apply directly; content rewrites and node/edge/group deletions require confirmation. Compare versions and protect later human edits from stale proposals. Clicking smart layout already authorizes that spatial change, without another confirmation step.
+- **Overview to reading:** numbered sections match the reading bar. Overview labels remain readable at low zoom and open a section in reading view. Searchable content navigation and wheel panning help explore larger boards.
 - **Simpler board management:** switch, import and export from the title menu. A delete button changes in place to “确认删除”; click again to delete, or close the menu to cancel.
 
 See the [changelog](./CHANGELOG.md) for the complete history.
@@ -53,8 +74,8 @@ See the [changelog](./CHANGELOG.md) for the complete history.
 ## A typical workflow
 
 1. Ask the agent to compare three product directions and identify assumptions and validation methods.
-2. Move cards, edit text or adjust a visual's parameters directly.
-3. Select relevant cards and continue the discussion. Visuals also support detail references and discussion of their current state.
+2. Explore the structure first. For an existing board, choose “智能布局” to reorganize it, then open a node for its original content.
+3. Adjust visual parameters or switch to the content canvas to edit and move cards. Select relevant cards to continue the discussion; visuals support detail references and discussion of their current state.
 4. Compare proposed changes before accepting or rejecting them.
 5. Execute a suggested next step or write your own; undo or export a backup when needed.
 
@@ -89,6 +110,9 @@ The interface currently uses Chinese labels.
 | Delete selection | Delete / Backspace |
 | Browse and zoom | Wheel pans; Cmd/Ctrl + wheel zooms |
 | Pan | Space + drag or middle-button drag |
+| Smart layout | “智能布局” asks the configured agent to organize relationships; local rules apply without an agent |
+| Spacing cleanup | Open the menu beside “智能布局” and choose “仅整理间距” |
+| Structure / content | Use “结构” / “内容” on multi-node boards; open a structure node, then “在内容画布中查看” to edit it |
 | Reading / overview | “阅读” / “总览”, or jump through content navigation |
 | Undo / redo | Cmd/Ctrl + Z / Cmd/Ctrl + Shift + Z; Windows also supports Ctrl + Y |
 | Shortcuts | Click “?” or press ? |
@@ -112,12 +136,21 @@ type DSLPatch = {
   type: 'dsl_patch';
   summary: string;
   ops: PatchOp[];
+  presentation?: { layout: 'auto' | 'preserve'; plan?: SpatialPlan };
   actions?: { id: string; label: string; prompt: string; nodeIds?: string[] }[];
   questions?: string[]; // legacy suggestions
 };
+
+type SpatialPlan = { description: string; root: SpatialItem };
+type SpatialItem =
+  | { nodeId: string }
+  | { groupId: string; direction?: 'row' | 'column' | 'orbit' }
+  | { direction: 'row' | 'column' | 'orbit'; children: SpatialItem[]; label?: string };
 ```
 
 Operations add, update or delete cards, notes, groups and edges, or adjust layout. Invalid references, duplicate IDs, invalid geometry or scope violations fail the batch atomically. Recent conversation and human edits inform later requests; selected nodes keep their complete body text in context.
+
+With `layout: 'auto'`, `presentation.plan` describes semantic structure that the host projects into measured full-content geometry and a compact structure view. `layout: 'preserve'` retains model-authored coordinates without a plan. Plans reference existing or newly added nodes and do not broaden modification permissions. The dedicated smart-layout task accepts only `ops: []` and a plan covering all current nodes. Visual HTML/SVG/JavaScript remains open-ended model output.
 
 Cards can carry open visual content:
 
@@ -161,9 +194,13 @@ Live CLI tests are explicit opt-ins. They use the installed CLI's authentication
 ```bash
 AGENTBOARD_LIVE_CLI=codex npm run test:e2e -- e2e/live-agent.spec.ts --workers=1
 AGENTBOARD_LIVE_ACTIONS=pi npm run test:e2e -- e2e/live-actions.spec.ts --workers=1
+AGENTBOARD_LIVE_COMPOSITION=pi npm run test:e2e -- e2e/board-composition.spec.ts -g "a real CLI" --workers=1
+AGENTBOARD_LIVE_SPATIAL=pi npm run test:e2e -- e2e/semantic-layout.spec.ts -g "real CLI" --workers=1
 ```
 
-Test screenshots, traces, generated boards, build output and local runtime records are excluded from GitHub. Useful regression tests remain in `src/**/__tests__`, `src/**/*.test.ts` and `e2e/`.
+v0.3.7 release validation: 238 unit tests passed; 58 browser tests passed with 4 live CLI cases skipped by default; the production build passed. A separate real Pi CLI spatial-planning call also verified that original text, visual source and interaction state were retained.
+
+Raw test screenshots, traces, generated boards, build output and local runtime records are excluded from GitHub. Curated public example screenshots used by this README live in `assets/`. Useful regression tests remain in `src/**/__tests__`, `src/**/*.test.ts` and `e2e/`.
 
 ```text
 src/
@@ -171,7 +208,7 @@ src/
   engine/         # patch application, validation and history
   agent/          # adapters, context, streaming and risk assessment
   server/         # CLI catalog, discovery and event parsing
-  presentation/   # measured geometry and collision avoidance
+  presentation/   # semantic plans, structure maps, measured geometry and layout
   visuals/        # visual contract and isolated runtime
   hooks/          # React state and interactions
   components/     # canvas, composer, settings and review

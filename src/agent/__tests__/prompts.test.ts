@@ -81,7 +81,8 @@ describe('buildSystemPrompt', () => {
     const prompt = buildSystemPrompt();
     expect(prompt).toMatch(/Preserve the current layout by default/);
     expect(prompt).toMatch(/scope "all"/);
-    expect(prompt).toMatch(/at least 56px visual spacing/);
+    expect(prompt).toMatch(/host packs sections to a readable page width using actual rendered sizes/);
+    expect(prompt).toMatch(/manually placed cards/);
     expect(prompt).toMatch(/Do not add a layout op just because multiple nodes were added/);
   });
 

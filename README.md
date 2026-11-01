@@ -1,16 +1,29 @@
 # AgentBoard
 
-**用自然语言生成可交互可视化，和 AI 在同一张画布上持续共创。**
+**和 AI 在同一张画布上思考，让内容可以看懂、操作和持续演进。**
 
-AgentBoard 是一个 local-first 的可视化协作画布。描述你想理解的问题或探索的方案，让 Agent 生成图解、交互图表、机制演示或可试用原型；直接操作其中的内容，再让 Agent 基于当前状态继续修改。
+AgentBoard 是一个 local-first 的可视化协作画布。描述你想理解的问题或探索的方案，让 Agent 生成图解、交互图表、机制演示或可试用原型；先看清整体关系，再进入细节操作，让 Agent 基于当前状态继续修改。模型自由选择表达方式，画布负责呈现、交互与可审阅的协作。
 
-[English](./README.en.md) · [v0.3.5 更新记录](./CHANGELOG.md) · [贡献指南](./CONTRIBUTING.md)
+[English](./README.en.md) · [更新记录](./CHANGELOG.md) · [贡献指南](./CONTRIBUTING.md)
 
 ![AgentBoard cover](./assets/agentboard-cover.png)
 
-## v0.3.5 核心更新：加入可交互可视化
+## v0.3.7：让布局帮助理解内容
 
-这一版加入了开放式可视化生成与运行能力。Agent 可以用 HTML、SVG 和 JavaScript 自由组织表达，把对话中的想法变成可以查看、操作和继续完善的画布内容。
+点击“智能布局”，当前 Agent 会读取白板的真实内容、交互状态、分组和连线，组织有意义的空间关系：比较的方向并排，证据靠近判断，风险与行动各有位置。新生成内容也可以在同一轮返回空间方案。
+
+- **按内容组织**：空间方案可以递归组合行、列与环绕关系，表达比较、论证、层级和流程。宿主按实测尺寸排布，模型也可以保留自定义坐标。
+- **先看结构，再读细节**：结构视图呈现摘要与已有关系，点击节点打开完整文字或原始交互可视化；切到内容视图继续编辑、拖动和共创。
+- **只整理布局**：主动点击“智能布局”会授权一次空间整理；宿主拒绝这次操作增删或改写内容，保留视觉源码与参数，支持撤销，并检查等待期间的编辑冲突。
+- **保留快速整理**：布局菜单中的“仅整理间距”处理间距与碰撞。未连接 Agent 时，智能布局使用明确标注的本地规则，依据已有分组、关系和标签组织内容。
+
+![AgentBoard v0.3.7 结构视图](./assets/agentboard-semantic-layout.png)
+
+浏览器回归测试中的示例场景：左侧证据支持中间判断，右侧风险约束判断，下方承接下一步行动。点击任一节点即可阅读原文。
+
+## 开放式交互可视化
+
+Agent 可以用 HTML、SVG 和 JavaScript 自由组织表达，把对话中的想法变成可以查看、操作和继续完善的画布内容。
 
 - **生成可视化**：用自然语言创建结构图、交互图表、解释器、模拟器和可试用原型，由 Agent 根据问题选择表达形式。
 - **直接操作**：调整参数、切换条件、观察结果；交互状态随白板保存，刷新或重新展开后可以继续。
@@ -40,12 +53,20 @@ npm run dev -- --host 127.0.0.1
 - **连接 Agent**：打开右上角设置，选择本机已安装并完成认证的 CLI，或配置 Claude / OpenAI 兼容 API。
 - **开始共创**：选择起始任务，或点击底部输入条描述需求；选中已有内容后，可以围绕它继续讨论。
 
+已有本地项目可以更新后重新启动：
+
+```bash
+git pull --ff-only
+npm ci
+npm run dev -- --host 127.0.0.1
+```
+
 ## 配套体验改进
 
 - **更大的画布**：输入框默认收起为居中的悬浮小条，点击展开，空内容离开后收起；两侧仍可操作画布。生成中可停止，也可先写下一步草稿。
 - **连续协作**：每张白板分别保存草稿、运行记录和待确认修改；刷新、切换白板后可以继续。Agent 的下一步建议可以一键执行，保留未发送草稿。
-- **可审阅的修改**：新增等低风险操作直接应用；改写内容、删除节点/连线/分组、全图布局先确认。可以预览前后版本，旧提案不能覆盖后续人工修改。
-- **可读的大画布**：按实际渲染尺寸避让卡片和分组；提供阅读视图、总览、内容导航和滚动浏览。
+- **可审阅的修改**：新增等低风险操作直接应用；改写内容、删除节点/连线/分组等修改先确认。可以预览前后版本，旧提案不能覆盖后续人工修改。主动点击“智能布局”已授权本次空间整理，无需重复确认。
+- **从总览进入阅读**：板块编号与顶部阅读导航对应；缩小时板块标题保持可读，点击即可进入该板块。支持内容搜索、逐项跳转和滚动浏览。
 - **更顺畅的白板管理**：标题下拉菜单支持切换、导入、导出；删除按钮会原位变为“确认删除”，再次点击执行，关闭菜单则取消。
 
 完整变更见 [CHANGELOG](./CHANGELOG.md)。
@@ -53,8 +74,8 @@ npm run dev -- --host 127.0.0.1
 ## 一次典型的协作
 
 1. 输入“比较三种产品方向，帮我找出假设和验证方法”，让 Agent 选择合适的表达。
-2. 直接移动卡片、编辑文字或操作视觉中的参数。
-3. 选中相关卡片，继续提问；视觉也支持“引用细节”和“与 Agent 讨论”。
+2. 在结构视图看清整体；已有白板可以点击“智能布局”重新组织，点击节点进入原始内容。
+3. 操作视觉中的参数，或切到内容视图编辑、移动卡片；选中相关卡片继续提问，视觉也支持“引用细节”和“与 Agent 讨论”。
 4. 在修改提案中查看前后变化，再决定采纳或放弃。
 5. 点击可执行的下一步建议，或写下自己的下一步；需要时撤销、导出备份。
 
@@ -87,6 +108,9 @@ CLI 模式复用本机已有能力；API 模式不会自动获得文件、命令
 | 删除选中内容 | Delete / Backspace |
 | 浏览与缩放 | 滚轮浏览；Cmd/Ctrl + 滚轮缩放 |
 | 平移画布 | Space + 拖拽，或鼠标中键拖拽 |
+| 智能布局 | 点击“智能布局”，由当前 Agent 组织内容关系；未配置时使用本地规则 |
+| 仅整理间距 | 打开“智能布局”旁的菜单，选择“仅整理间距” |
+| 结构 / 内容 | 多节点白板使用顶部切换；点击结构节点查看原文，选择“在内容画布中查看”进入编辑 |
 | 阅读 / 总览 | 使用左上角“阅读”“总览”，或通过内容导航跳转 |
 | 撤销 / 重做 | Cmd/Ctrl + Z / Cmd/Ctrl + Shift + Z；Windows 也支持 Ctrl + Y |
 | 查看快捷键 | 点击“?”或按 ? |
@@ -110,12 +134,21 @@ type DSLPatch = {
   type: 'dsl_patch';
   summary: string;
   ops: PatchOp[];
+  presentation?: { layout: 'auto' | 'preserve'; plan?: SpatialPlan };
   actions?: { id: string; label: string; prompt: string; nodeIds?: string[] }[];
   questions?: string[]; // 兼容旧版建议
 };
+
+type SpatialPlan = { description: string; root: SpatialItem };
+type SpatialItem =
+  | { nodeId: string }
+  | { groupId: string; direction?: 'row' | 'column' | 'orbit' }
+  | { direction: 'row' | 'column' | 'orbit'; children: SpatialItem[]; label?: string };
 ```
 
 支持卡片、便签、分组、连线的增删改和布局操作。无效引用、重复 ID、无效几何或超出授权范围会使整批修改失败，不会留下半更新状态。近期对话和人工编辑会作为后续上下文，所选节点会保留完整正文。
+
+`presentation.plan` 在 `layout: 'auto'` 时提供语义空间结构，由宿主分别投影为实测完整内容布局与紧凑结构视图；`layout: 'preserve'` 保留模型自定义坐标，不携带 plan。空间方案引用现有节点或本次新增节点，不扩大修改权限。“智能布局”专用任务只接受 `ops: []` 与覆盖当前全部节点的方案。视觉的 HTML/SVG/JavaScript 仍由模型自由生成。
 
 卡片可附带开放式视觉内容：
 
@@ -159,9 +192,13 @@ npm run preview    # 预览静态产物，不含 CLI bridge
 ```bash
 AGENTBOARD_LIVE_CLI=codex npm run test:e2e -- e2e/live-agent.spec.ts --workers=1
 AGENTBOARD_LIVE_ACTIONS=pi npm run test:e2e -- e2e/live-actions.spec.ts --workers=1
+AGENTBOARD_LIVE_COMPOSITION=pi npm run test:e2e -- e2e/board-composition.spec.ts -g "a real CLI" --workers=1
+AGENTBOARD_LIVE_SPATIAL=pi npm run test:e2e -- e2e/semantic-layout.spec.ts -g "real CLI" --workers=1
 ```
 
-测试截图、trace、生成白板、构建产物和本地运行记录均不提交到 GitHub。有效回归测试保留在 `src/**/__tests__`、`src/**/*.test.ts` 和 `e2e/`。
+v0.3.7 发布验证：238 个单元测试通过；浏览器回归 58 个通过、4 个真实 CLI 用例默认跳过；生产构建通过。另用真实 Pi CLI 验证了一次空间规划，确认原文、视觉源码与交互状态保留。
+
+原始测试截图、trace、生成白板、构建产物和本地运行记录均不提交到 GitHub；README 使用的公开示例截图单独存放于 `assets/`。有效回归测试保留在 `src/**/__tests__`、`src/**/*.test.ts` 和 `e2e/`。
 
 ```text
 src/
@@ -169,7 +206,7 @@ src/
   engine/         # patch 应用、校验和事务历史
   agent/          # 适配器、上下文、流式响应与风险评估
   server/         # CLI 目录、发现与事件解析
-  presentation/   # 实测尺寸与布局避让
+  presentation/   # 语义空间方案、结构地图、实测尺寸与布局
   visuals/        # 视觉协议与隔离运行时
   hooks/          # React 状态和交互
   components/     # 画布、输入框、设置和审阅界面

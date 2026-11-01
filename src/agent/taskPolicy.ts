@@ -1,4 +1,5 @@
 import type { AgentTaskPolicy, BoardDSL, DSLPatch, PatchOp } from '../types/dsl';
+import { spatialNodeIds } from '../presentation/spatialPlan';
 
 export interface PolicyViolation {
   opIndex: number;
@@ -21,6 +22,14 @@ export function validatePatchPolicy(patch: DSLPatch, policy: AgentTaskPolicy, bo
   const addedIds = new Set(patch.ops.flatMap(op => op.op === 'add_node' ? [op.node.id] : []));
   const inScope = (id: string) => selectedIds.has(id) || addedIds.has(id);
   const violations: PolicyViolation[] = [];
+  if (policy.layoutOnly && (patch.ops.length || !patch.presentation?.plan)) violations.push({ opIndex: -1, op: 'layout', message: '智能布局只接受空间方案，不能增删或改写白板内容。' });
+  if (patch.presentation?.plan && board) {
+    const context = { ...board, nodes: [...board.nodes, ...patch.ops.flatMap(op => op.op === 'add_node' ? [op.node] : [])], groups: [...board.groups, ...patch.ops.flatMap(op => op.op === 'add_group' ? [op.group] : [])] };
+    const ids = spatialNodeIds(patch.presentation.plan, context);
+    if (policy.layoutOnly && board.nodes.some(node => !ids.includes(node.id))) violations.push({ opIndex: -1, op: 'layout', message: '智能布局的空间方案需要覆盖当前全部内容。' });
+    if (policy.scope === 'selection' && ids.some(id => !inScope(id))) violations.push({ opIndex: -1, op: 'layout', message: '空间方案包含当前选择范围之外的内容。' });
+    if (policy.scope === 'board' && !policy.allowFullBoardLayout && ids.some(id => !addedIds.has(id))) violations.push({ opIndex: -1, op: 'layout', message: '调整已有内容的整体空间方案需要全图布局权限。' });
+  }
 
   patch.ops.forEach((op, opIndex) => {
     if (!policy.allowDelete && (op.op === 'delete_node' || op.op === 'delete_edge' || op.op === 'delete_group')) {
@@ -66,6 +75,7 @@ export function validatePatchPolicy(patch: DSLPatch, policy: AgentTaskPolicy, bo
 }
 
 export function describeTaskPolicy(policy: AgentTaskPolicy) {
+  if (policy.layoutOnly) return 'Spatial planning only: return a DSLPatch with ops: [] and presentation: { layout: "auto", plan: { description, root } }. Read the content, choose meaningful relationships, and organize every existing node exactly once. Do not add, rewrite, delete or execute content; do not access files, network or tools. This explicit host action authorizes spatial arrangement only.';
   const scope = policy.scope === 'selection'
     ? `Only work around the selected nodes: ${policy.selectedNodeIds.join(', ')}.`
     : 'The whole board is in scope.';

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { VisualContent, VisualReference } from '../types/dsl';
 import { buildVisualSandbox } from '../visuals/sandbox';
@@ -6,6 +6,7 @@ import { readVisualReference, validVisualState, visualError } from '../visuals/c
 
 interface Props {
   preview?: boolean;
+  hideExpand?: boolean;
   nodeId: string;
   title: string;
   visual: VisualContent;
@@ -18,7 +19,7 @@ export default function VisualSurface(props: Props) {
   const { nodeId, title, visual } = props;
   const [expanded, setExpanded] = useState(false);
   const [picking, setPicking] = useState(false);
-  const [status, setStatus] = useState<'loading' | 'ready'>('loading');
+  const [status, setStatus] = useState<'loading' | 'painting' | 'ready'>('loading');
   const [error, setError] = useState<string | null>(null);
   const [generation, setGeneration] = useState(0);
   const iframeRef = useRef<HTMLIFrameElement>(null);
@@ -46,7 +47,7 @@ export default function VisualSurface(props: Props) {
     function receive(event: MessageEvent) {
       if (event.source !== iframeRef.current?.contentWindow || event.data?.channel !== channel) return;
       const msg = event.data;
-      if (msg.type === 'rendered') { clearTimeout(timer); setStatus('ready'); }
+      if (msg.type === 'rendered') { clearTimeout(timer); setStatus('painting'); }
       if (msg.type === 'error') { clearTimeout(timer); setError(String(msg.message).slice(0, 500)); }
       if (msg.type === 'state' && validVisualState(msg.state)) {
         const encoded = JSON.stringify(msg.state);
@@ -70,6 +71,13 @@ export default function VisualSurface(props: Props) {
     window.addEventListener('message', receive);
     return () => { clearTimeout(timer); window.removeEventListener('message', receive); };
   }, [channel, nodeId]);
+
+  useLayoutEffect(() => {
+    if (status !== 'painting') return;
+    // Reveal the sandbox before enabling input so the browser can update its iframe hit regions.
+    let frame = requestAnimationFrame(() => { frame = requestAnimationFrame(() => setStatus('ready')); });
+    return () => cancelAnimationFrame(frame);
+  }, [status, channel]);
 
   useEffect(() => {
     const encoded = JSON.stringify(visual.state ?? {});
@@ -110,18 +118,18 @@ export default function VisualSurface(props: Props) {
             {picking ? '点击图中要讨论的元素' : '引用细节'}
           </button>
           <button type="button" onClick={() => latest.current.onAsk(nodeId, '请基于这个视觉的当前状态继续分析。')}>与 Agent 讨论</button></> : null}
-          {expanded
+          {props.hideExpand ? null : expanded
             ? <button type="button" className="visual-close" onClick={() => setExpanded(false)}>收起</button>
             : <button type="button" onClick={() => setExpanded(true)}>展开</button>}
         </div>
       </div>
       {contractError ? <div className="visual-error" role="alert">{contractError}</div> : (
-        <div className={`visual-frame${status === 'loading' && !error ? ' is-loading' : ''}`} aria-busy={status === 'loading'}>
+        <div className={`visual-frame${status === 'loading' && !error ? ' is-loading' : ''}${status === 'painting' && !error ? ' is-preparing' : ''}`} aria-busy={status !== 'ready'}>
           <iframe ref={iframeRef} title={`${title} · 交互内容`} srcDoc={srcDoc}
-            sandbox="allow-scripts" referrerPolicy="no-referrer" tabIndex={status === 'loading' ? -1 : 0}
+            sandbox="allow-scripts" referrerPolicy="no-referrer" tabIndex={status !== 'ready' ? -1 : 0}
             allow="camera 'none'; microphone 'none'; geolocation 'none'; clipboard-read 'none'; clipboard-write 'none'"
             onLoad={initialize} style={{ height: expanded ? undefined : (visual.height ?? 420) }} />
-          {status === 'loading' && !error ? <div className="visual-loading" role="status"><span aria-hidden="true" />正在准备交互内容</div> : null}
+          {status !== 'ready' && !error ? <div className="visual-loading" role="status"><span aria-hidden="true" />正在准备交互内容</div> : null}
         </div>
       )}
       {error ? <div className="visual-error" role="status">

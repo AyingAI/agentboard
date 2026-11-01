@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { INTERACTION_KINDS, LAYOUT_ALGORITHMS, NODE_TYPES, PATCH_OP_TYPES } from '../../types/dsl';
+import { INTERACTION_KINDS, LAYOUT_ALGORITHMS, NODE_TYPES, PATCH_OP_TYPES, PRESENTATION_LAYOUTS, SPATIAL_DIRECTIONS } from '../../types/dsl';
 import { buildSystemPrompt } from '../prompts';
 
 /**
@@ -17,6 +17,18 @@ import { buildSystemPrompt } from '../prompts';
  */
 describe('DSL schema ↔ system prompt consistency', () => {
   const prompt = buildSystemPrompt();
+  it('describes composable spatial relationships and layout-only tasks', () => {
+    for (const direction of SPATIAL_DIRECTIONS) expect(prompt).toContain(`"${direction}"`);
+    for (const field of ['plan', 'description', 'root', 'nodeId', 'groupId', 'direction', 'children', 'label']) expect(prompt).toContain(`"${field}"`);
+    expect(prompt).toContain('ops: [] and a plan, never content rewrites');
+  });
+
+  it('describes automatic packing and preserving arbitrary model-authored spatial meaning', () => {
+    expect(prompt).toContain('"presentation"');
+    for (const mode of PRESENTATION_LAYOUTS) expect(prompt).toContain(`"${mode}"`);
+    expect(prompt).toContain('forms beyond the named layout algorithms');
+    expect(prompt).toContain('does not broaden edit scope');
+  });
 
   it('describes executable action fields and keeps actual questions in interaction requests', () => {
     for (const field of ['actions', 'id', 'label', 'prompt', 'nodeIds']) expect(prompt).toContain(`"${field}"`);

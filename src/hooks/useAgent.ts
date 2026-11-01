@@ -443,7 +443,7 @@ export function useAgent(
           return;
         }
 
-        if (patch.ops.length) access.current.setBoard(resultBoard);
+        if (patch.ops.length || patch.presentation?.plan) access.current.setBoard(resultBoard);
         setAppliedPatch({
           id: `applied_${Date.now()}_${Math.random().toString(16).slice(2)}`,
           runId: run.id,

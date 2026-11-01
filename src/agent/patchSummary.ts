@@ -1,4 +1,5 @@
 import type { BoardDSL, DSLPatch, PatchOp } from '../types/dsl';
+import { spatialNodeIds } from '../presentation/spatialPlan';
 
 export interface PatchChangeSummary {
   counts: Record<PatchOp['op'], number>;
@@ -51,6 +52,10 @@ export function summarizePatchChanges(patch: DSLPatch, resultBoard: BoardDSL): P
     if (op.op === 'layout' && op.scope === 'all') {
       resultBoard.nodes.forEach((node) => nodeIds.add(node.id));
     }
+  }
+  if (patch.presentation?.plan) {
+    spatialNodeIds(patch.presentation.plan, resultBoard).forEach(id => nodeIds.add(id));
+    counts.layout += 1;
   }
 
   return {

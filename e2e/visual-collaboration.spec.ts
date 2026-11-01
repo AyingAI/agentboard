@@ -14,7 +14,7 @@ const board = { version: '0.1', board: { id: 'board', title: '共创空间', vie
 const patch = (ops: unknown[], summary = '已完善视觉', questions: string[] = []) => ({ type: 'dsl_patch', summary, ops, questions });
 const visualFrame = (page: Page) => page.locator('[data-node-id="visual"]').frameLocator('iframe');
 
-async function start(page: Page, nodes: unknown[] = [visualNode]) {
+async function start(page: Page, nodes: unknown[] = [visualNode], waitForReady = true) {
   await page.addInitScript(({ board, nodes }) => {
     if (window.top !== window) return;
     if (!localStorage.getItem('agentboard.sessions')) localStorage.setItem('agentboard.sessions', JSON.stringify({
@@ -24,6 +24,7 @@ async function start(page: Page, nodes: unknown[] = [visualNode]) {
   }, { board, nodes });
   await page.route('**/api/clis', route => route.fulfill({ json: [{ id: 'codex', name: 'Codex CLI', available: true }] }));
   await page.goto('/');
+  if (waitForReady) await expect(page.locator('.visual-loading')).toHaveCount(0);
 }
 
 async function agentResponse(page: Page, value: unknown, requests: any[] = []) {
@@ -222,11 +223,12 @@ test('visuals become interactive after their scripts finish loading', async ({ p
   });
   const html = '<button id="ready-ask">继续探索</button><script src="https://cdn.jsdelivr.net/agentboard-ready-test.js"></script><script>document.getElementById("ready-ask").onclick=()=>agentboard.ask("脚本已准备好，可以继续讨论")</script>';
   try {
-    await start(page, [{ ...visualNode, visual: { html, height: 200 } }]);
+    await start(page, [{ ...visualNode, visual: { html, height: 200 } }], false);
     await expect(page.locator('.visual-loading')).toBeVisible();
     await expect(page.locator('.visual-frame iframe')).toBeHidden();
     release();
     await expect(page.locator('.visual-loading')).toHaveCount(0);
+    await expect(page.locator('.canvas-content')).not.toHaveClass(/presentation-settling/);
     await visualFrame(page).getByRole('button', { name: '继续探索' }).click();
     await expect(page.locator('.prompt-bar textarea')).toHaveValue('脚本已准备好，可以继续讨论');
     await expect(page.locator('.visual-error')).toHaveCount(0);

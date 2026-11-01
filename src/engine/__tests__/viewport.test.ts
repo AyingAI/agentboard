@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { BoardDSL } from '../../types/dsl';
-import { boardBounds, fitBoardViewport, zoomAroundPoint } from '../viewport';
+import { boardBounds, fitBoardViewport, readingBoardViewport, zoomAroundPoint } from '../viewport';
 
 const board: BoardDSL = {
   version: '0.1',
@@ -54,4 +54,17 @@ it('fits very large boards without clipping at the old minimum zoom', () => {
   const view = fitBoardViewport(large, 1200, 800, 40);
   expect(view.zoom).toBeLessThan(.35);
   expect(12000 * view.zoom).toBeLessThanOrEqual(720);
+});
+
+it('fits a near-screen-sized first section above the composer while retaining readable scale', () => {
+  const section = { ...board, nodes: [{ ...board.nodes[0], width: 740, height: 720 }, { ...board.nodes[1], x: 900, y: 1100, width: 740, height: 720 }], groups: [{ id: 'a', title: '第一节', nodeIds: ['n1'] }, { id: 'b', title: '第二节', nodeIds: ['n2'] }] };
+  const view = readingBoardViewport(section, 1280, 760);
+  expect(view.zoom).toBeGreaterThanOrEqual(.8); expect(view.zoom).toBeLessThan(1);
+  expect(section.nodes[0].y * view.zoom + view.panOffset.y).toBeGreaterThanOrEqual(24);
+  expect((section.nodes[0].y + section.nodes[0].height + 28) * view.zoom + view.panOffset.y).toBeLessThanOrEqual(736);
+});
+
+it('does not shrink a very long section into unreadable text to fit its entire height', () => {
+  const long = { ...board, nodes: [{ ...board.nodes[0], width: 700, height: 4000 }] };
+  expect(readingBoardViewport(long, 1280, 760).zoom).toBeGreaterThanOrEqual(.8);
 });

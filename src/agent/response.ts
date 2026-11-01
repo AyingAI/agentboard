@@ -1,6 +1,7 @@
-import { INTERACTION_KINDS, PATCH_OP_TYPES, type AgentAction, type DSLPatch, type InteractionOption, type InteractionRequest } from '../types/dsl';
+import { INTERACTION_KINDS, PATCH_OP_TYPES, PRESENTATION_LAYOUTS, type AgentAction, type DSLPatch, type InteractionOption, type InteractionRequest } from '../types/dsl';
 import type { AgentResponse } from './types';
 import { visualError } from '../visuals/contract';
+import { spatialPlanError } from '../presentation/spatialPlan';
 
 export function extractJson(text: string): string {
   return getJsonCandidates(text)[0] ?? text;
@@ -9,6 +10,10 @@ export function extractJson(text: string): string {
 function assertIsDSLPatch(obj: Record<string, unknown>): DSLPatch {
   if (typeof obj.summary !== 'string') throw new Error('Missing or invalid "summary" field');
   if (!Array.isArray(obj.ops)) throw new Error('Missing or invalid "ops" array');
+  const presentation = obj.presentation as DSLPatch['presentation'];
+  if (presentation !== undefined && (!presentation || typeof presentation !== 'object' || !(PRESENTATION_LAYOUTS as readonly string[]).includes(presentation.layout))) throw new Error('Invalid presentation.layout: expected auto or preserve');
+  if (presentation?.plan) { const error = spatialPlanError(presentation.plan); if (error) throw new Error(error); }
+  if (presentation?.plan && presentation.layout === 'preserve') throw new Error('Use auto for a spatial plan, or preserve for custom coordinates.');
   for (const raw of obj.ops) {
     if (!raw || typeof raw !== 'object') throw new Error('Invalid patch operation');
     const op = raw as Record<string, any>;
@@ -23,6 +28,7 @@ function assertIsDSLPatch(obj: Record<string, unknown>): DSLPatch {
     type: 'dsl_patch',
     summary: obj.summary,
     ops: obj.ops as DSLPatch['ops'],
+    ...(presentation ? { presentation: { layout: presentation.layout, ...(presentation.plan ? { plan: presentation.plan } : {}) } } : {}),
     ...(Array.isArray(obj.actions) ? { actions: obj.actions.filter((action): action is AgentAction => Boolean(action && typeof action === 'object' && typeof action.id === 'string' && action.id.trim() && typeof action.label === 'string' && action.label.trim() && typeof action.prompt === 'string' && action.prompt.trim() && (action.nodeIds === undefined || Array.isArray(action.nodeIds) && action.nodeIds.every((id: unknown) => typeof id === 'string')))) } : {}),
     questions: Array.isArray(obj.questions) ? obj.questions.filter((q): q is string => typeof q === 'string') : [],
   };

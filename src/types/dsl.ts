@@ -194,10 +194,21 @@ export interface AgentAction {
 }
 
 /** Stable patch format produced by Agent (or mock) */
+export const PRESENTATION_LAYOUTS = ['auto', 'preserve'] as const;
+export const SPATIAL_DIRECTIONS = ['row', 'column', 'orbit'] as const;
+/** Composable spatial relationships; HTML and custom coordinates remain open-ended. */
+export type SpatialItem = { nodeId: string } | { groupId: string; direction?: (typeof SPATIAL_DIRECTIONS)[number] }
+  | { direction: (typeof SPATIAL_DIRECTIONS)[number]; children: SpatialItem[]; label?: string };
+export interface SpatialPlan {
+  description: string;
+  root: SpatialItem;
+}
 export interface DSLPatch {
   type: 'dsl_patch';
   summary: string;
   ops: PatchOp[];
+  /** Let the host compose ordinary content, or retain meaningful model-authored coordinates. */
+  presentation?: { layout: (typeof PRESENTATION_LAYOUTS)[number]; plan?: SpatialPlan };
   questions?: string[];
   actions?: AgentAction[];
 }
@@ -373,6 +384,8 @@ export interface AgentTaskPolicy {
   allowExistingEdits: boolean;
   allowDelete: boolean;
   allowFullBoardLayout: boolean;
+  /** Explicit host action: infer spatial relationships, with no content operations. */
+  layoutOnly?: boolean;
 }
 
 /** A single event in a run's history — persisted for resumability across refreshes */

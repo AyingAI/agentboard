@@ -71,11 +71,10 @@ export function readingBoardViewport(board: BoardDSL, width: number, height: num
     ? board.nodes.filter(item => Math.abs(item.y - node.y) < 40) : [node];
   const region = boardBounds({ ...board, nodes: regionNodes, groups: group ? [group] : [] })!;
   const padding = width < 640 ? 18 : 40;
-  const zoom = Math.min(1, Math.max(width < 640 ? .45 : .8, (width - 2 * padding) / region.width));
+  const zoom = Math.min(1, Math.max(width < 640 ? .45 : .8, Math.min((width - 2 * padding) / region.width, (height - 48) / region.height)));
   const fitsRegion = region.width * zoom <= width - padding * 2;
-  const topPadding = board.groups.some(group => group.nodeIds.includes(node.id)) ? 68 : 24;
   return { zoom, panOffset: {
     x: fitsRegion ? (width - region.width * zoom) / 2 - region.minX * zoom : padding - node.x * zoom,
-    y: Math.max(topPadding, Math.min(80, (height - node.height * zoom) / 2)) - node.y * zoom,
+    y: 24 - region.minY * zoom,
   } };
 }
