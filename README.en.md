@@ -8,7 +8,26 @@ AgentBoard is a local-first visual collaboration canvas. Describe a question or 
 
 ![AgentBoard cover](./assets/agentboard-cover.png)
 
-## v0.3.7: layout that helps explain content
+## v0.4.0 · Suggestions prepared by the agent
+
+Start with topic research or themed experience planning, enter a goal and add a source. Once an agent is connected, new material, committed content edits and changed constraints trigger a background analysis without requiring a chat prompt.
+
+- **Automatic board titles.** The first content written to a default-named board gives it a short title. Reviewed drafts name the board when you apply them. A title you set takes priority.
+- **Visible activity.** Connections and cards light up while the first board content is generated. On existing boards, the composer shows current activity and emerging content. The history sidebar holds execution details.
+
+- **Prepared results.** The composer shows a suggestion when one is ready. Open it in the history sidebar for the full draft and supporting cards. A saved URL alone is not treated as read evidence.
+- **Project continuity.** Edit goals and constraints under the board analysis settings in the Agent suggestions tab. Saved and dismissed suggestions inform later discussion. Changes to cited material, relationships, groups or project constraints move old suggestions into review history.
+- **See what a change affects.** After a material or constraint changes, the discoveries panel checks a small set of existing outcomes and groups them by what needs revision, what needs verification, and what can be reused. Open the original card or jump to a prepared revision.
+- **Reviewable adoption:** save a prepared result with links to its sources in one undoable action, or continue through a normal reviewed agent task. Background discoveries do not rewrite existing content.
+- **Controlled activity.** Automatic analysis runs on committed changes to the visible board and uses the connected model's quota. Each board defaults to 12 automatic attempts per day. Adjust or remove the cap under the board's goals and constraints, or pause automatic analysis. Manual analysis and chat remain available.
+
+Research focuses on how material supports or limits an angle. Experience planning connects audience, theme, participant activities and changed constraints. Examples, source collection, return markers and editable Markdown drafts remain available without an agent.
+
+**Optional Jev review.** In Agent settings, open the connection details in “Jev 复查”, enter a TypeSafe API key, and turn on the switch. Jev checks potentially affected outcomes before the primary agent prepares a revision and reviews the resulting discoveries. The primary agent handles the check when Jev is unavailable. Enabled evaluation sends the goal, constraints, and relevant content to TypeSafe. Keys persist in browser storage. Static deployments require TypeSafe CORS support. [Native System One API](https://docs.typesafe.ai/api/system-one)
+
+Background CLI analysis supports Codex, Claude Code and Pi with narrower execution profiles. Other CLIs remain available for explicit tasks. Claude and OpenAI-compatible APIs also support discovery. Freeform boards are analyzed after a committed edit. Example boards can opt in through the board analysis settings. This version does not monitor closed pages or automatically retrieve external sources.
+
+## Layout that helps explain content
 
 Choose “智能布局” to ask the configured agent to read actual board content, visual state, groups and connections, then organize meaningful spatial relationships. Compare alternatives side by side, connect evidence to a decision, and give risks and next steps their own place. New generations can return a spatial plan in the same response.
 
@@ -34,7 +53,7 @@ For example:
 
 > Turn browser caching into an interactive visualization. Let me switch cache conditions and observe how request paths and results change. Save my choices so I can reference a detail and ask a follow-up.
 
-Before connecting an agent, try the included compound-interest lab and change its parameters to explore the interaction.
+Before connecting an agent, explore the topic-research or activity-planning examples on the start screen. The unrelated interactive-demo entry has been removed.
 
 ## Quick start
 
@@ -49,9 +68,9 @@ npm run dev -- --host 127.0.0.1
 
 Open the local URL printed in the terminal, normally `http://127.0.0.1:5173`.
 
-- **Try it first:** choose the interactive example on an empty canvas. The included compound-interest lab is pregenerated and works without an agent or a model call.
-- **Connect an agent:** open settings and select an installed, authenticated local CLI, or configure Claude / an OpenAI-compatible API.
-- **Start collaborating:** choose a starter task or activate the floating input strip. Select existing content to focus the next discussion on it.
+- **Start with a real task:** choose topic research or themed experience planning on an empty canvas. Enter a question and add your first source, or open either example without connecting an agent.
+- **Explore your sources:** save links, excerpts, or notes. Choose which cards to discuss, then connect a local CLI or API when you want help. Review suggested additions before applying them.
+- **Pick up where you left off:** bookmark a card as your next starting point. Assemble an outline or experience proposal from the board or a selection, then edit and copy it as Markdown.
 
 To update an existing checkout and restart:
 
@@ -91,7 +110,7 @@ This supports idea exploration, explanations, experiment design and simulations.
 
 Detection supports Claude Code, OpenCode, Pi, Codex, Gemini, Antigravity, Qwen Code, Cursor Agent, GitHub Copilot CLI, Qoder, Kimi and Trae. Settings show the detected version and exact executable path. Use refresh after installing or upgrading a CLI.
 
-CLI mode reuses local capabilities. API mode does not automatically have file, command or search tools. API requests originate in the browser, so the endpoint must allow the appropriate cross-origin requests. API keys and settings stay in browser `localStorage` and are not written to the repository.
+First-time setup prefers an installed Pi and preserves any existing selection. CLI mode reuses local capabilities. API mode does not automatically have file, command or search tools. API requests originate in the browser, so the endpoint must allow the appropriate cross-origin requests. API keys and settings stay in browser `localStorage` and are not written to the repository.
 
 **The local CLI bridge works only in the Vite development server.** The output of `npm run build` and the `npm run preview` server do not include a CLI backend. Keep the development server local: it can launch supported CLIs on your machine.
 
@@ -120,11 +139,11 @@ The interface currently uses Chinese labels.
 
 ## Save, recover and back up
 
-- Boards, drafts, run records, interaction state and pending proposals stay in the current browser.
+- Boards, drafts, run records, interaction state, pending proposals, goals, constraints and discoveries stay in the current browser.
 - Each board retains up to 25 undo/redo steps across reloads and board switches.
 - Export `.agentboard.json` from the board menu. Imports accept that format or raw `BoardDSL`, validate it and open it as a new board.
 - Saves attempt to retain a previous local copy. Missing or corrupt primary data triggers backup recovery when available; unavailable or full storage shows an export action.
-- Board exports include canvas content and visual state, excluding agent keys, conversation drafts and the complete run history.
+- Board exports include canvas content and visual state, excluding agent keys, conversation drafts, companion records and the complete run history. Findings saved as canvas cards are included.
 - Board deletion cannot be undone, and at least one board is kept. Export important work first. Clearing browser data removes local work; cloud sync and automatic cross-device recovery are not available.
 
 ## Protocol and visual runtime
@@ -135,6 +154,7 @@ The interface currently uses Chinese labels.
 type DSLPatch = {
   type: 'dsl_patch';
   summary: string;
+  boardTitle?: string; // Suggested title when first writing to a default-named board
   ops: PatchOp[];
   presentation?: { layout: 'auto' | 'preserve'; plan?: SpatialPlan };
   actions?: { id: string; label: string; prompt: string; nodeIds?: string[] }[];
@@ -174,7 +194,7 @@ agentboard.reference('This result', 'result-element-id');
 
 `ask()` only drafts a request for the user to send; a host next-step button can start an agent call directly. Native controls with stable IDs or names automatically persist in `state._inputs`. Omitting `state` when updating `visual.html` preserves current state.
 
-Inline scripts and script libraries from jsDelivr, cdnjs, esm.sh and unpkg are supported. Visuals cannot access host storage, arbitrary network requests, remote images, nested iframes or top-level navigation. Complete responses are validated before visuals are applied. Progress shows actual activity, content clues and received characters, without invented percentages.
+Visuals run in a sandboxed iframe and receive host state through a dedicated message port. CSP restricts network APIs, remote images, nested frames and form submissions. Inline scripts and libraries from jsDelivr, cdnjs, esm.sh and unpkg are supported. Browsers still allow a frame to navigate itself. Check the source of imported boards and third-party scripts. [Security policy](./SECURITY.md)
 
 ## Development and tests
 
@@ -185,6 +205,7 @@ npm run test       # unit tests
 npm run test:e2e   # isolated browser regression tests; no real model calls
 npm run build      # build static output in dist/
 npm run preview    # preview static output; no CLI bridge
+npm audit --registry=https://registry.npmjs.org
 ```
 
 Browser tests use installed Chrome on macOS and Playwright Chromium elsewhere. Run `npx playwright install chromium` if required.
@@ -198,9 +219,13 @@ AGENTBOARD_LIVE_COMPOSITION=pi npm run test:e2e -- e2e/board-composition.spec.ts
 AGENTBOARD_LIVE_SPATIAL=pi npm run test:e2e -- e2e/semantic-layout.spec.ts -g "real CLI" --workers=1
 ```
 
-v0.3.7 release validation: 238 unit tests passed; 58 browser tests passed with 4 live CLI cases skipped by default; the production build passed. A separate real Pi CLI spatial-planning call also verified that original text, visual source and interaction state were retained.
+To verify real discoveries in both scenes, start the dev server and run in another terminal:
 
-Raw test screenshots, traces, generated boards, build output and local runtime records are excluded from GitHub. Curated public example screenshots used by this README live in `assets/`. Useful regression tests remain in `src/**/__tests__`, `src/**/*.test.ts` and `e2e/`.
+```bash
+AGENTBOARD_LIVE_DISCOVERY=codex AGENTBOARD_LIVE_URL=http://127.0.0.1:5173 npm run test -- src/server/__tests__/discoveryLive.test.ts
+```
+
+Default browser tests assert behavior and retain traces on failure. Opt-in live checks can save local boards and screenshots. Git ignores build outputs and local runtime records. Curated public examples live in `assets/`.
 
 ```text
 src/

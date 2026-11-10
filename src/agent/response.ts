@@ -27,6 +27,7 @@ function assertIsDSLPatch(obj: Record<string, unknown>): DSLPatch {
   return {
     type: 'dsl_patch',
     summary: obj.summary,
+    ...(typeof obj.boardTitle === 'string' ? { boardTitle: obj.boardTitle } : {}),
     ops: obj.ops as DSLPatch['ops'],
     ...(presentation ? { presentation: { layout: presentation.layout, ...(presentation.plan ? { plan: presentation.plan } : {}) } } : {}),
     ...(Array.isArray(obj.actions) ? { actions: obj.actions.filter((action): action is AgentAction => Boolean(action && typeof action === 'object' && typeof action.id === 'string' && action.id.trim() && typeof action.label === 'string' && action.label.trim() && typeof action.prompt === 'string' && action.prompt.trim() && (action.nodeIds === undefined || Array.isArray(action.nodeIds) && action.nodeIds.every((id: unknown) => typeof id === 'string')))) } : {}),
@@ -96,7 +97,7 @@ function parseAgentResponseCandidate(candidate: string): AgentResponse {
   throw new Error(`Missing or invalid "type" field: got "${String(obj.type)}"`);
 }
 
-function getJsonCandidates(text: string): string[] {
+export function getJsonCandidates(text: string): string[] {
   const candidates: string[] = [];
   const add = (candidate: string) => {
     const trimmed = candidate.trim();

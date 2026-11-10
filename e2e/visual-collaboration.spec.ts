@@ -39,21 +39,28 @@ async function submit(page: Page, text: string) {
   await page.locator('.prompt-bar textarea').press('Enter');
 }
 
-test('first screen explains open visual collaboration', async ({ page }) => {
+test('first screen offers two clear starts without unrelated demos', async ({ page }) => {
   await start(page, []);
-  await expect(page.getByRole('heading', { name: '和 Agent 一起，把想法变成可操作的内容' })).toBeVisible();
-  await expect(page.getByRole('button', { name: /看懂一个系统/ })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '今天想弄清楚什么？' })).toBeVisible();
+  await expect(page.getByRole('button', { name: /研究一个选题/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: /策划一次活动或旅行/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: /交互示例|看懂一个系统/ })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: '自由开始，先记一条想法' })).toBeVisible();
+  await expect(page.getByRole('button', { name: '智能布局', exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: '自由开始，先记一条想法' }).click();
+  await expect(page.locator('.board-node')).toHaveCount(1);
+  await expect(page.getByRole('button', { name: '智能布局', exact: true })).toBeVisible();
 });
 
-test('the verified example works before an agent is configured', async ({ page }) => {
+test('an imported visual example works before an agent is configured', async ({ page }) => {
+  const sample = await (await page.request.get('/examples/compound-lab.agentboard.json')).json();
+  await page.addInitScript(board => { localStorage.setItem('agentboard.sessions', JSON.stringify({ activeId: 'sample', sessions: [{ id: 'sample', title: board.board.title, board, createdAt: 1, updatedAt: 1 }] })); }, sample.board);
   await page.goto('/');
-  await page.getByRole('button', { name: '先体验一个交互示例 →' }).click();
   const frame = page.locator('.visual-node').frameLocator('iframe');
   await expect(frame.locator('#years')).toHaveValue('5');
   await frame.locator('#years').focus();
   await frame.locator('#years').press('End');
   await expect(frame.locator('#result')).toContainText('4,321.94');
-  await page.screenshot({ path: 'docs/verification/agentboard-v0.3-example.png', fullPage: true });
 });
 
 test('page load handlers and native control state survive without a custom SDK integration', async ({ page }) => {
@@ -194,7 +201,7 @@ test('a real adapter response may contain more than three operations', async ({ 
   await expect(page.locator('.board-node')).toHaveCount(5);
 });
 
-test('generated code cannot read host storage, submit agent requests or access arbitrary network', async ({ page }) => {
+test('generated code cannot read host storage, submit agent requests or fetch arbitrary URLs', async ({ page }) => {
   const requests: any[] = [];
   await agentResponse(page, patch([]), requests);
   const malicious = `<p id="result">testing</p><script>
@@ -212,6 +219,20 @@ test('generated code cannot read host storage, submit agent requests or access a
   expect(requests).toHaveLength(0);
   expect(exfiltrated).toBe(false);
   expect(await page.locator('iframe').getAttribute('sandbox')).toBe('allow-scripts');
+});
+
+test('a navigated visual frame cannot receive host initialization again', async ({ page }) => {
+  await page.route('**/frame-navigation-test', route => route.fulfill({
+    contentType: 'text/html',
+    body: '<p id="arrived">Second document</p><script>onmessage=()=>{document.querySelector("p").textContent="Received host data"}</script>',
+  }));
+  const html = '<button id="leave" onclick="location.href=\'/frame-navigation-test\'">Navigate</button>';
+  await start(page, [{ ...visualNode, visual: { html, state: { sample: 'synthetic state' } } }]);
+  const frame = visualFrame(page);
+  await frame.locator('#leave').click();
+  await expect(frame.locator('#arrived')).toHaveText('Second document');
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  await expect(frame.locator('#arrived')).toHaveText('Second document');
 });
 
 test('visuals become interactive after their scripts finish loading', async ({ page }) => {

@@ -8,11 +8,15 @@ import { findAgentResponseJson } from './src/agent/response';
 import { readCliEvent, type CliOutputState } from './src/server/cliEvents';
 import { draftTitles } from './src/agent/liveProgress';
 import type { AgentProgressEvent } from './src/types/dsl';
+import { discoveryCliArgs, findDiscoveryJson } from './src/server/discoveryCli';
+import { isLocalRequest, LocalRequestError, readLocalJson, sendLocalJson } from './src/server/localApi';
 
 const CLI_TIMEOUT_MS = 600_000;
 const HEARTBEAT_INTERVAL_MS = 5_000;
 const RUN_RETENTION_MS = 10 * 60_000;
 const MAX_INCOMPLETE_OUTPUT_CHARS = 4_000_000;
+const MAX_RUN_REQUEST_BYTES = 4 * 1024 * 1024;
+const RUN_ID = /^[A-Za-z0-9_-]{1,128}$/;
 
 type StoredRun = {
   status: 'running' | 'completed' | 'failed' | 'cancelled';
@@ -84,12 +88,16 @@ function runCLIStream(
   userMessage: string,
   res: ServerResponse,
   run: StoredRun,
+  purpose?: 'discovery',
 ): Promise<string> {
   const fullPrompt = `${systemPrompt}\n\n---\n\n${userMessage}`;
   const spec = getCliSpec(cli.id);
   if (!spec || !cli.path) return Promise.reject(new Error(`CLI "${cli.name}" is not available`));
   const usesEvents = ['claude', 'pi', 'codex'].includes(spec.id);
-  const args = spec.promptMode === 'argument' ? [...spec.args, fullPrompt] : spec.args;
+  const backgroundArgs = purpose === 'discovery' ? discoveryCliArgs(cli.id) : null;
+  if (purpose === 'discovery' && !backgroundArgs) return Promise.reject(new Error('此 CLI 暂不支持后台分析，请选用 Codex、Claude Code、Pi 或 API；手动讨论仍可正常使用。'));
+  const args = backgroundArgs ?? (spec.promptMode === 'argument' ? [...spec.args, fullPrompt] : spec.args);
+  const findResponse = purpose === 'discovery' ? findDiscoveryJson : findAgentResponseJson;
 
   return new Promise((resolve, reject) => {
     const startedAt = Date.now();
@@ -152,13 +160,13 @@ function runCLIStream(
 
     const finishIfCompleteResponse = () => {
       const text = state.resultText || state.partialText || state.assistantText;
-      const responseJson = findAgentResponseJson(text);
+      const responseJson = findResponse(text);
       if (!responseJson) return false;
 
       finish(() => {
         writeStreamEvent(res, {
           type: 'progress',
-          event: { type: 'working', message: '已获得结构化结果，正在应用到白板' },
+          event: { type: 'working', message: purpose === 'discovery' ? '发现已准备好' : '已获得结构化结果，正在应用到白板' },
         });
         child.kill('SIGTERM');
         resolve(responseJson);
@@ -168,7 +176,7 @@ function runCLIStream(
 
     const finishIfOutputTooLarge = () => {
       const text = state.resultText || state.partialText || state.assistantText;
-      if (text.length < MAX_INCOMPLETE_OUTPUT_CHARS || findAgentResponseJson(text)) return false;
+      if (text.length < MAX_INCOMPLETE_OUTPUT_CHARS || findResponse(text)) return false;
 
       finish(() => {
         writeStreamEvent(res, {
@@ -234,102 +242,82 @@ function runCLIStream(
   });
 }
 
-/** Parse JSON body from IncomingMessage */
-function parseBody(req: IncomingMessage): Promise<string> {
-  return new Promise((resolve) => {
-    const chunks: Buffer[] = [];
-    req.on('data', (chunk: Buffer) => chunks.push(chunk));
-    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf-8')));
-  });
-}
-
 type MiddlewareFn = (req: IncomingMessage, res: ServerResponse, next: () => void) => void;
 
 /** Create a single middleware that handles both /api/clis and /api/agent/run */
 function createApiHandler(registry: CliRegistry): MiddlewareFn {
   return (req, res, next) => {
     const url = new URL(req.url || '/', 'http://localhost');
+    const path = url.pathname;
+    const runId = path.startsWith('/api/agent/run/') ? path.slice('/api/agent/run/'.length) : null;
+    if (path !== '/api/clis' && path !== '/api/agent/run' && runId === null) { next(); return; }
+    if (!isLocalRequest(req)) { sendLocalJson(res, 403, { error: 'Local same-origin requests only' }); return; }
 
-    // GET /api/clis
-    if (url.pathname === '/api/clis' && req.method === 'GET') {
-      res.setHeader('Content-Type', 'application/json');
-      res.setHeader('Cache-Control', 'no-store');
+    if (path === '/api/clis' && req.method === 'GET') {
       registry.get(url.searchParams.get('refresh') === '1')
-        .then(clis => res.end(JSON.stringify(clis.map(publicCliInfo))))
-        .catch(() => { res.statusCode = 500; res.end(JSON.stringify({ error: '本地 CLI 检测失败，请重试。' })); });
+        .then(clis => sendLocalJson(res, 200, clis.map(publicCliInfo)))
+        .catch(() => sendLocalJson(res, 500, { error: '本地 CLI 检测失败，请重试。' }));
       return;
     }
 
-    // POST /api/agent/run
-    if (url.pathname === '/api/agent/run' && req.method === 'POST') {
-      handleRun(req, res, registry);
+    if (path === '/api/agent/run' && req.method === 'POST') {
+      void handleRun(req, res, registry);
       return;
     }
 
-    const runMatch = url.pathname.match(/^\/api\/agent\/run\/([^/]+)$/);
-    if (runMatch && req.method === 'GET') {
-      handleRunStatus(decodeURIComponent(runMatch[1]), res);
-      return;
-    }
-    if (runMatch && req.method === 'DELETE') {
-      handleRunCancel(decodeURIComponent(runMatch[1]), res);
-      return;
+    if (runId !== null) {
+      if (!RUN_ID.test(runId)) { sendLocalJson(res, 400, { error: 'Invalid run ID' }); return; }
+      if (req.method === 'GET') { handleRunStatus(runId, res); return; }
+      if (req.method === 'DELETE') { handleRunCancel(runId, res); return; }
     }
 
-    next();
+    sendLocalJson(res, 405, { error: 'Method not allowed' });
   };
 }
 
 async function handleRun(req: IncomingMessage, res: ServerResponse, registry: CliRegistry) {
   let requestId = '';
+  let run: StoredRun | undefined;
   try {
-    const body = await parseBody(req);
-    const parsed = JSON.parse(body);
+    const parsed = await readLocalJson(req, MAX_RUN_REQUEST_BYTES);
     const { cliId, systemPrompt, userMessage } = parsed;
-    requestId = typeof parsed.requestId === 'string' && parsed.requestId
-      ? parsed.requestId
-      : crypto.randomUUID();
-
-    if (!requestId || !cliId || !systemPrompt || !userMessage) {
-      res.statusCode = 400;
-      res.setHeader('Content-Type', 'application/json');
-      res.end(JSON.stringify({ error: 'Missing required fields: requestId, cliId, systemPrompt, userMessage' }));
-      return;
+    if (typeof cliId !== 'string' || !getCliSpec(cliId) || typeof systemPrompt !== 'string' || !systemPrompt.trim()
+      || typeof userMessage !== 'string' || !userMessage.trim()) {
+      throw new LocalRequestError(400, 'Invalid cliId, systemPrompt or userMessage');
     }
+    if (parsed.requestId !== undefined && (typeof parsed.requestId !== 'string' || !RUN_ID.test(parsed.requestId))) {
+      throw new LocalRequestError(400, 'Invalid run ID');
+    }
+    requestId = parsed.requestId ?? crypto.randomUUID();
 
     const clis = await registry.get(true);
     if (res.destroyed || res.writableEnded) return;
     const cli = clis.find((c) => c.id === cliId);
     if (!cli || !cli.available) {
-      res.statusCode = 400;
-      res.setHeader('Content-Type', 'application/json');
-      res.end(JSON.stringify({ error: `CLI "${cliId}" is not available` }));
-      return;
+      throw new LocalRequestError(400, `CLI "${cliId}" is not available`);
     }
+    if (activeRuns.has(requestId)) throw new LocalRequestError(409, 'Run ID already exists');
 
-    console.log(`[agent-bridge] Running ${cliId} (${userMessage.slice(0, 40)}...)`);
-    const run: StoredRun = { status: 'running', updatedAt: Date.now() };
+    run = { status: 'running', updatedAt: Date.now() };
     activeRuns.set(requestId, run);
     res.statusCode = 200;
     res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
-    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Cache-Control', 'no-store, no-transform');
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.flushHeaders();
 
-    const text = await runCLIStream(requestId, cli, systemPrompt, userMessage, res, run);
+    const text = await runCLIStream(requestId, cli, systemPrompt, userMessage, res, run, parsed.purpose === 'discovery' ? 'discovery' : undefined);
+    if (run.status === 'cancelled') { res.end(); return; }
     run.status = 'completed';
     run.text = text;
     run.child = undefined;
     run.updatedAt = Date.now();
     scheduleRunCleanup(requestId);
-    console.log(`[agent-bridge] ${cliId} → ${text.length} chars`);
 
     writeStreamEvent(res, { type: 'result', text });
     res.end();
   } catch (err) {
-    console.error('[agent-bridge] Error:', err);
-    const message = err instanceof Error ? err.message : String(err);
-    const run = requestId ? activeRuns.get(requestId) : undefined;
+    const message = err instanceof Error ? err.message : '本地 CLI 执行失败';
     if (run && run.status === 'running') {
       run.status = 'failed';
       run.error = message;
@@ -341,9 +329,8 @@ async function handleRun(req: IncomingMessage, res: ServerResponse, registry: Cl
       writeStreamEvent(res, { type: 'error', message });
       res.end();
     } else {
-      res.statusCode = 500;
-      res.setHeader('Content-Type', 'application/json');
-      res.end(JSON.stringify({ error: message }));
+      sendLocalJson(res, err instanceof LocalRequestError ? err.status : 500,
+        { error: err instanceof LocalRequestError ? message : '本地 CLI 执行失败，请检查连接后重试。' });
     }
   }
 }
@@ -351,27 +338,21 @@ async function handleRun(req: IncomingMessage, res: ServerResponse, registry: Cl
 function handleRunStatus(requestId: string, res: ServerResponse) {
   const run = activeRuns.get(requestId);
   if (!run) {
-    res.statusCode = 404;
-    res.setHeader('Content-Type', 'application/json');
-    res.end(JSON.stringify({ error: 'Run not found' }));
+    sendLocalJson(res, 404, { error: 'Run not found' });
     return;
   }
 
-  res.setHeader('Content-Type', 'application/json');
-  res.setHeader('Cache-Control', 'no-store');
-  res.end(JSON.stringify({
+  sendLocalJson(res, 200, {
     status: run.status,
     text: run.status === 'completed' ? run.text : undefined,
     error: run.status === 'failed' || run.status === 'cancelled' ? run.error : undefined,
-  }));
+  });
 }
 
 function handleRunCancel(requestId: string, res: ServerResponse) {
   const run = activeRuns.get(requestId);
   if (!run) {
-    res.statusCode = 404;
-    res.setHeader('Content-Type', 'application/json');
-    res.end(JSON.stringify({ error: 'Run not found' }));
+    sendLocalJson(res, 404, { error: 'Run not found' });
     return;
   }
 
@@ -402,22 +383,7 @@ export function agentBridgePlugin(): Plugin {
     configureServer(server) {
       const registry = createCliRegistry(() => discoverClis(KNOWN_CLIS));
 
-      const handler = createApiHandler(registry);
-
-      // Add to middleware stack — goes to the end
-      server.middlewares.use(handler);
-
-      // Post-setup: move our handler to the FRONT of the stack
-      // so it runs before Vite's SPA HTML fallback
-      return () => {
-        const stack = (server.middlewares as unknown as { stack: Array<{ route: string; handle: MiddlewareFn }> }).stack;
-        const idx = stack.findIndex((layer) => layer.handle === handler);
-        if (idx > 0) {
-          const [layer] = stack.splice(idx, 1);
-          stack.unshift(layer);
-          console.log('[agent-bridge] API handler moved to front of middleware stack');
-        }
-      };
+      server.middlewares.use(createApiHandler(registry));
     },
   };
 }

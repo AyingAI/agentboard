@@ -34,8 +34,14 @@ export function preserveVisualState(board: BoardDSL, patch: DSLPatch): DSLPatch 
   };
 }
 
-export function patchConflicts(base: BoardDSL, current: BoardDSL, patch: DSLPatch): string[] {
+export function patchConflicts(base: BoardDSL, current: BoardDSL, patch: DSLPatch, sourceIds: string[] = []): string[] {
   const conflicts: string[] = [];
+  for (const id of sourceIds) {
+    const before = base.nodes.find(node => node.id === id);
+    const now = current.nodes.find(node => node.id === id);
+    if (!before || !now || before.title !== now.title || before.body !== now.body
+      || JSON.stringify(before.visual) !== JSON.stringify(now.visual)) conflicts.push(id);
+  }
   if (patch.presentation?.plan) {
     const ids = spatialNodeIds(patch.presentation.plan, base);
     if (ids.some(id => JSON.stringify(base.nodes.find(node => node.id === id)) !== JSON.stringify(current.nodes.find(node => node.id === id)))

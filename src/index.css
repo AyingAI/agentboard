@@ -352,20 +352,6 @@ button:disabled {
   flex-shrink: 0;
 }
 
-.agent-status-pill {
-  display: inline-flex;
-  align-items: center;
-  height: 30px;
-  padding: 0 10px;
-  border: 1px solid #e1e5ec;
-  border-radius: 999px;
-  background: #f7f8fb;
-  color: #596477;
-  font-size: 12px;
-  font-weight: 600;
-  white-space: nowrap;
-}
-
 .topbar-actions button {
   font-size: 12px;
   font-weight: 500;
@@ -2761,10 +2747,6 @@ select:focus-visible,
 
   .current-board-title {
     max-width: 130px;
-  }
-
-  .agent-status-pill {
-    display: none;
   }
 
   .workspace.activity-open {

@@ -8,7 +8,7 @@ export interface SettingsOption {
   badge?: string;
 }
 
-export default function SettingsSelect({ label, value, options, onChange, placeholder = '请选择', disabled = false, searchable = false }: {
+export default function SettingsSelect({ label, value, options, onChange, placeholder = '请选择', disabled = false, searchable = false, triggerText, searchPlaceholder = '搜索名称或版本…' }: {
   label: string;
   value: string;
   options: SettingsOption[];
@@ -16,6 +16,8 @@ export default function SettingsSelect({ label, value, options, onChange, placeh
   placeholder?: string;
   disabled?: boolean;
   searchable?: boolean;
+  triggerText?: string;
+  searchPlaceholder?: string;
 }) {
   const id = useId();
   const trigger = useRef<HTMLButtonElement>(null);
@@ -89,13 +91,13 @@ export default function SettingsSelect({ label, value, options, onChange, placeh
     <button ref={trigger} type="button" className={`settings-select-trigger${open ? ' is-open' : ''}`}
       role="combobox" aria-label={label} aria-expanded={open} aria-haspopup="listbox" aria-controls={`${id}-listbox`}
       aria-activedescendant={open && filtered[active] ? `${id}-option-${active}` : undefined}
-      disabled={disabled} onClick={() => open ? close() : show()} onKeyDown={keydown}>
-      <span className="settings-select-value"><span className={selected ? '' : 'settings-select-placeholder'}>{selected?.label || placeholder}</span>
-        {selected?.badge ? <span className="settings-select-badge">{selected.badge}</span> : null}</span>
+      title={triggerText ? selected?.label : undefined} disabled={disabled} onClick={() => open ? close() : show()} onKeyDown={keydown}>
+      <span className="settings-select-value"><span className={selected || triggerText ? '' : 'settings-select-placeholder'}>{triggerText ?? (selected?.label || placeholder)}</span>
+        {!triggerText && selected?.badge ? <span className="settings-select-badge">{selected.badge}</span> : null}</span>
       <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="m4.5 6 3.5 3.5L11.5 6" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
     </button>
     {open ? createPortal(<div ref={popup} className="settings-select-popover" style={position} onKeyDown={keydown} onClick={event => event.stopPropagation()}>
-      {searchable ? <div className="settings-select-search"><input ref={search} aria-label={`搜索${label}`} placeholder="搜索名称或版本…" value={query}
+      {searchable ? <div className="settings-select-search"><input ref={search} aria-label={`搜索${label}`} placeholder={searchPlaceholder} value={query}
         onChange={event => { setQuery(event.target.value); setActive(0); }} role="combobox" aria-expanded="true" aria-controls={`${id}-listbox`}
         aria-activedescendant={filtered[active] ? `${id}-option-${active}` : undefined} /></div> : null}
       <div id={`${id}-listbox`} role="listbox" aria-label={label} className="settings-select-options">

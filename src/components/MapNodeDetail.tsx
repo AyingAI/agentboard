@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import type { BoardNode, VisualReference } from '../types/dsl';
 import VisualSurface from './VisualSurface';
+import { CardMaterial } from './Exploration';
 
 export default function MapNodeDetail({ node, onClose, onDiscuss, onShowOnCanvas, onStateChange, onReference, onAsk }: {
   node: BoardNode; onClose: () => void; onDiscuss: () => void; onShowOnCanvas: () => void;
@@ -12,7 +13,7 @@ export default function MapNodeDetail({ node, onClose, onDiscuss, onShowOnCanvas
   return createPortal(<dialog ref={dialog} className="map-node-detail" aria-label={node.title} onKeyDown={event => event.stopPropagation()} onCancel={event => { event.preventDefault(); onClose(); }}
     onClick={event => { if (event.target === dialog.current) { const rect = dialog.current!.getBoundingClientRect(); if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) onClose(); } }}>
     <div className="map-detail-heading"><div><span>{node.visual ? '交互内容' : '内容详情'}</span><h2>{node.title}</h2></div><button type="button" aria-label="返回结构视图" onClick={onClose}>×</button></div>
-    <div className="map-detail-content">{node.body ? <p className="map-detail-body">{node.body}</p> : null}
+    <div className="map-detail-content">{node.body ? <CardMaterial body={node.body} className="map-detail-body" /> : null}
       {node.visual ? <VisualSurface hideExpand nodeId={node.id} title={node.title} visual={node.visual} onStateChange={onStateChange}
         onReference={reference => { onReference(reference); onClose(); }} onAsk={(id, text) => { onAsk(id, text); onClose(); }} /> : null}
     </div>

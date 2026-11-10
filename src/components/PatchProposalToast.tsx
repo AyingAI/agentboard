@@ -6,6 +6,7 @@ const REASON_LABELS = {
   delete_edge: '删除连线',
   rewrite_content: '改写现有内容',
   full_board_layout: '重新整理整张白板',
+  suggested_changes: '探索建议',
 } as const;
 
 const OP_LABELS = {
@@ -51,7 +52,7 @@ export default function PatchProposalToast({
         </button>
       </div>
 
-      <p>这次修改包含高风险操作，白板尚未改变。</p>
+      <p>{proposal.risk.reasons.includes('suggested_changes') ? '请查看建议，再决定是否保存到白板。' : '这次修改包含高风险操作，白板尚未改变。'}</p>
 
       <div className="patch-proposal-reasons">
         {proposal.risk.reasons.map((reason) => (

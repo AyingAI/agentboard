@@ -1,5 +1,6 @@
 import type { BoardNode as BoardNodeType, VisualReference } from '../types/dsl';
 import VisualSurface from './VisualSurface';
+import { CardMaterial } from './Exploration';
 
 interface EditState {
   nodeId: string;
@@ -145,9 +146,7 @@ export default function BoardNode({
           }}
         />
       ) : (
-        <p onDoubleClick={(e) => { e.stopPropagation(); onStartEdit(node.id, 'body'); }}>
-          {node.body}
-        </p>
+        <CardMaterial body={node.body} onDoubleClick={e => { e.stopPropagation(); onStartEdit(node.id, 'body'); }} />
       )}
 
       {node.visual ? <VisualSurface nodeId={node.id} title={node.title} visual={node.visual}

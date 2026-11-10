@@ -56,7 +56,6 @@ test('smart layout reads content, changes only spatial structure and opens a rea
   for (const card of cards) { expect(card.x).toBeGreaterThanOrEqual(canvas.x); expect(card.right).toBeLessThanOrEqual(canvas.x + canvas.width); expect(card.y).toBeGreaterThanOrEqual(canvas.y); expect(card.bottom).toBeLessThan(canvas.y + canvas.height - 40); }
   const a = cards.find(n => n.id === 'a')!, b = cards.find(n => n.id === 'b')!, c = cards.find(n => n.id === 'c')!;
   expect(Math.abs(a.y - b.y)).toBeLessThan(2); expect(Math.abs(b.y - c.y)).toBeLessThan(2); expect(a.x).toBeLessThan(b.x); expect(b.x).toBeLessThan(c.x);
-  await page.screenshot({ path: 'docs/verification/semantic-v037-comparison.png', animations: 'disabled' });
   await page.reload(); await expect(page.locator('.semantic-map-node')).toHaveCount(10);
   expect((await stored(page)).history.past.length).toBe(after.history.past.length);
   await page.getByRole('button', { name: '撤销', exact: true }).click();
@@ -70,7 +69,6 @@ test('map details run the original interactive content and preserve state across
   const dialog = page.getByRole('dialog', { name: '方向 A · 会议行动助手', exact: true }); await expect(dialog).toBeVisible();
   const frame = dialog.frameLocator('iframe'); await frame.locator('#people').focus(); await frame.locator('#people').press('End');
   await expect(frame.locator('#result')).toHaveText('20 位用户');
-  await page.screenshot({ path: 'docs/verification/semantic-v037-detail.png', animations: 'disabled' });
   await dialog.getByRole('button', { name: '返回结构视图', exact: true }).click();
   await page.getByRole('button', { name: '查看内容：方向 A · 会议行动助手', exact: true }).click();
   await expect(dialog.frameLocator('iframe').locator('#people')).toHaveValue('20');
@@ -119,7 +117,6 @@ test('an argument gets a different spatial explanation, with evidence and risks 
   const left = (await page.locator('[data-map-node-id="e1"]').boundingBox())!, center = (await page.locator('[data-map-node-id="judgement"]').boundingBox())!, right = (await page.locator('[data-map-node-id="risk"]').boundingBox())!;
   expect(left.x).toBeLessThan(center.x); expect(center.x).toBeLessThan(right.x);
   await expect(page.locator('.semantic-map-edges > g')).toHaveCount(4);
-  await page.screenshot({ path: 'docs/verification/semantic-v037-argument.png', animations: 'disabled' });
 });
 
 test('edits made while the model is planning cannot be overwritten by its stale result', async ({ page }) => {
@@ -140,7 +137,6 @@ test('local structure fallback uses relationships and remains usable on a phone'
   await init(page, scenario(), false); await page.getByRole('button', { name: '智能布局', exact: true }).click(); await expect(page.locator('.semantic-map-node')).toHaveCount(10);
   await expect(page.locator('.spatial-note-source')).toHaveText('根据已有关系整理');
   await page.setViewportSize({ width: 390, height: 844 }); await page.getByRole('button', { name: '总览', exact: true }).click();
-  await page.screenshot({ path: 'docs/verification/semantic-v037-mobile.png', animations: 'disabled' });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.getByRole('button', { name: '查看内容：先验证哪一个产品方向？', exact: true }).click(); await expect(page.getByRole('dialog')).toBeVisible();
   await page.getByRole('button', { name: '返回结构视图', exact: true }).click();

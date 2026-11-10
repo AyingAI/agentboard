@@ -3,6 +3,7 @@ import type { ActivityEntry, BoardDSL, BoardNode as BoardNodeType, VisualReferen
 import BoardNode from './BoardNode';
 import BoardOverview from './BoardOverview';
 import EmptyBoardWelcome from './EmptyBoardWelcome';
+import type { ExplorationKind } from '../data/exploration';
 import EmptyBoardWorking from './EmptyBoardWorking';
 import type { RenderedNodeSize } from '../presentation/layout';
 
@@ -46,7 +47,6 @@ interface BoardCanvasProps {
   highlightedNodeIds: string[];
   highlightedEdgeIds: string[];
   isAgentConfigured: boolean;
-  configuredCliId?: string;
   panOffset: { x: number; y: number };
   zoom: number;
   tempLine: TempLine | null;
@@ -68,13 +68,11 @@ interface BoardCanvasProps {
   onCloseDeepDive: () => void;
   onDeepDiveInputChange: (value: string) => void;
   onSubmitDeepDive: () => void;
-  onConnectCli: (cliId: string) => void;
   onOpenAgentConfig: () => void;
-  onChooseStarterTask: (prompt: string) => void;
   onVisualStateChange: (nodeId: string, state: Record<string, unknown>) => void;
   onVisualReference: (reference: VisualReference) => void;
   onVisualAsk: (nodeId: string, text: string) => void;
-  onOpenExample: () => Promise<void>;
+  onStartExploration: (kind: ExplorationKind, question: string, material?: string, example?: boolean) => void;
 }
 
 interface SelectionBox {
@@ -323,7 +321,6 @@ export default function BoardCanvas({
   highlightedNodeIds,
   highlightedEdgeIds,
   isAgentConfigured,
-  configuredCliId,
   panOffset,
   zoom,
   tempLine,
@@ -345,13 +342,11 @@ export default function BoardCanvas({
   onCloseDeepDive,
   onDeepDiveInputChange,
   onSubmitDeepDive,
-  onConnectCli,
   onOpenAgentConfig,
-  onChooseStarterTask,
   onVisualStateChange,
   onVisualReference,
   onVisualAsk,
-  onOpenExample,
+  onStartExploration,
 }: BoardCanvasProps) {
   const [nodeMeasurements, setNodeMeasurements] = useState<NodeMeasurements>(() => new Map());
   const [selectionBox, setSelectionBox] = useState<SelectionBox | null>(null);
@@ -416,7 +411,7 @@ export default function BoardCanvas({
     const canvas = boardRef.current;
     if (!canvas) return;
     const wheel = (event: WheelEvent) => {
-      if ((event.target as HTMLElement).closest('.visual-surface,textarea,input,select,.deep-dive-panel')) return;
+      if ((event.target as HTMLElement).closest('.visual-surface,textarea,input,select,.deep-dive-panel,.empty-board-welcome')) return;
       wheelHandler.current(event);
     };
     canvas.addEventListener('wheel', wheel, { passive: false });
@@ -686,11 +681,8 @@ export default function BoardCanvas({
       {board.nodes.length === 0 && (isAgentPending ? <EmptyBoardWorking activity={runningActivity} /> : (
         <EmptyBoardWelcome
           isAgentConfigured={isAgentConfigured}
-          configuredCliId={configuredCliId}
-          onConnectCli={onConnectCli}
           onOpenConfig={onOpenAgentConfig}
-          onChooseTask={onChooseStarterTask}
-          onOpenExample={onOpenExample}
+          onStartExploration={onStartExploration}
           onCreateCard={() => {
             const rect = boardRef.current?.getBoundingClientRect();
             if (!rect) return;

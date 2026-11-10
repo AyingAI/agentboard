@@ -51,7 +51,6 @@ test('each follow-up is executable in one click and preserves the separate draft
   await start(page, [visual]); await submit(page);
   await expect(page.getByRole('button', { name: '切换极简记分卡', exact: true })).toBeVisible();
   await page.locator('.prompt-bar textarea').fill('这里是我还没有发送的下一步想法');
-  await page.screenshot({ animations: 'disabled', path: 'docs/verification/canvas-v033-actions.png' });
   await page.getByRole('button', { name: '增加实测历史', exact: true }).click();
   await expect.poll(() => requests.length).toBe(2);
   expect(requests[1].userMessage).toContain(actions[1].prompt);
@@ -73,7 +72,8 @@ test('older combined offers become separate direct actions', async ({ page }) =>
 });
 
 test('rendered content and group bounds never overlap, overview fits and navigation restores readable scale', async ({ page }) => {
-  const nodes = Array.from({ length: 14 }, (_, index) => ({ ...textNode(`n${index}`, 80 + index % 3 * 350, 80 + Math.floor(index / 3) * 200, ('观察真实行为，记录证据并继续验证。\n').repeat(index % 3 === 0 ? 18 : 8)), title: ['理解问题', '确定假设', '收集证据', '展开方案', '比较方向', '找到取舍', '设计实验', '真实反馈', '调整目标', '验证结果', '复盘判断', '下一步行动', '长期记录', '实测记分卡'][index] }));
+  const longTitle = '实测记分卡 · 记录每次对比的原始数据和观察过程，再决定哪些调整值得进入下一轮验证';
+  const nodes = Array.from({ length: 14 }, (_, index) => ({ ...textNode(`n${index}`, 80 + index % 3 * 350, 80 + Math.floor(index / 3) * 200, ('观察真实行为，记录证据并继续验证。\n').repeat(index % 3 === 0 ? 18 : 8)), title: ['理解问题', '确定假设', '收集证据', '展开方案', '比较方向', '找到取舍', '设计实验', '真实反馈', '调整目标', '验证结果', '复盘判断', '下一步行动', '长期记录', longTitle][index] }));
   const groups = [0, 1, 2].map(index => ({ id: `g${index}`, title: ['理解与探索', '实验与验证', '判断与行动'][index], nodeIds: nodes.slice(index * 3, index * 3 + 3).map(node => node.id) }));
   const ops = [...nodes.map(node => ({ op: 'add_node', node })), ...groups.map(group => ({ op: 'add_group', group }))];
   await answer(page, patch(ops, { actions: [{ id: 'compare', label: '继续比较关键方向', prompt: '基于当前证据比较关键方向。' }] }));
@@ -84,7 +84,6 @@ test('rendered content and group bounds never overlap, overview fits and navigat
   await expect.poll(() => overlapCount(page)).toBe(0);
   await expect.poll(async () => Number((await page.locator('.canvas-zoom-value').innerText()).replace('%', ''))).toBeGreaterThanOrEqual(80);
   await dockIsClear(page);
-  await page.screenshot({ animations: 'disabled', path: 'docs/verification/canvas-v033-reading.png' });
   await page.getByRole('button', { name: '总览', exact: true }).click();
   const canvas = (await page.locator('.board-canvas').boundingBox())!;
   const bounds = await rectangles(page);
@@ -92,9 +91,14 @@ test('rendered content and group bounds never overlap, overview fits and navigat
     expect(rect.x).toBeGreaterThanOrEqual(canvas.x); expect(rect.right).toBeLessThanOrEqual(canvas.x + canvas.width + 1);
     expect(rect.y).toBeGreaterThanOrEqual(canvas.y); expect(rect.bottom).toBeLessThanOrEqual(canvas.y + canvas.height + 1);
   }
-  await page.screenshot({ animations: 'disabled', path: 'docs/verification/canvas-v033-overview.png' });
-  await page.getByRole('combobox', { name: '内容导航', exact: true }).click();
-  await page.getByRole('option', { name: '实测记分卡', exact: true }).click();
+  const header = page.locator('.canvas-header');
+  const headerHeight = (await header.boundingBox())!.height;
+  const navigator = page.getByRole('combobox', { name: '内容导航', exact: true });
+  await navigator.click();
+  await page.getByRole('combobox', { name: '搜索内容导航' }).fill('实测记分卡');
+  await page.getByRole('option', { name: longTitle, exact: true }).click();
+  await expect(navigator).toHaveAttribute('title', longTitle);
+  expect((await header.boundingBox())!.height).toBe(headerHeight);
   const focused = (await page.locator('[data-node-id="n13"]').boundingBox())!;
   expect(focused.y).toBeGreaterThanOrEqual(canvas.y); expect(focused.y).toBeLessThan(canvas.y + canvas.height / 2);
   expect(Number((await page.locator('.canvas-zoom-value').innerText()).replace('%', ''))).toBeGreaterThanOrEqual(80);
@@ -125,7 +129,6 @@ test('selection context is compact and clearing it restores whole-board scope', 
   await expect(page.locator('.prompt-scope-button')).toHaveText('实测记分卡');
   await expect(page.locator('.prompt-targets')).toHaveClass(/has-selection/);
   await expect(page.locator('.prompt-context-bar')).not.toContainText('1/3');
-  await page.screenshot({ animations: 'disabled', path: 'docs/verification/canvas-v033-selection.png' });
   await page.getByRole('button', { name: '取消选中内容', exact: true }).click();
   await expect(page.locator('.prompt-scope-button')).toContainText('整张画布');
 });
@@ -137,5 +140,4 @@ test('expanded completion and history leave a visible canvas in a compact window
   await page.getByRole('button', { name: /展开说明/ }).click();
   await dockIsClear(page);
   expect((await page.locator('.board-canvas').boundingBox())!.height).toBeGreaterThan(120);
-  await page.screenshot({ animations: 'disabled', path: 'docs/verification/canvas-v033-compact.png' });
 });

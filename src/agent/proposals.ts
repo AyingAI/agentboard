@@ -5,7 +5,7 @@ import { assessPatchRisk } from './patchRisk';
 export function restorePendingProposal(runs: Record<string, RunState>) {
   const run = Object.values(runs).reverse().find(run => run.pendingProposal);
   if (!run?.pendingProposal) return null;
-  return { ...run.pendingProposal, runId: run.id, risk: assessPatchRisk(run.pendingProposal.patch) };
+  return { ...run.pendingProposal, runId: run.id, risk: assessPatchRisk(run.pendingProposal.patch, run.taskPolicy?.reviewChanges) };
 }
 
 export function clearPendingProposals(runs: Record<string, RunState>): Record<string, RunState> {

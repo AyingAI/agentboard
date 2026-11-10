@@ -3,6 +3,8 @@ import type { AgentConfig } from './types/dsl';
 import { validateBoard } from './engine/validation';
 import { boardVisualErrors } from './visuals/contract';
 import { applyVisualPatch } from './visuals/patch';
+import { restoreCollaboration } from './agent/discoveries';
+import { emptyBoard, isDefaultBoardTitle } from './data/initialBoard';
 
 const SESSIONS_KEY = 'agentboard.sessions';
 const OLD_BOARD_KEY = 'agentboard.phase1.board';
@@ -33,6 +35,9 @@ function readSessions(raw: string | null): SessionsData | null {
     for (const session of data.sessions) {
       if (!session || typeof session.id !== 'string' || !session.id || ids.has(session.id) || typeof session.title !== 'string' || !validBoard(session.board)) return null;
       ids.add(session.id);
+      if (typeof session.autoTitlePending !== 'boolean') {
+        session.autoTitlePending = session.board.board.id === emptyBoard.board.id && isDefaultBoardTitle(session.title) && !session.board.nodes.length;
+      }
       // A damaged undo entry must not break an otherwise usable board.
       if (session.history) session.history = {
         past: Array.isArray(session.history.past) ? session.history.past.filter(validBoard) : [],
@@ -52,6 +57,7 @@ function readSessions(raw: string | null): SessionsData | null {
         }));
       }
       if (typeof session.draft !== 'string') delete session.draft;
+      session.collaboration = restoreCollaboration(session.collaboration);
     }
     return { sessions: data.sessions, activeId: ids.has(data.activeId) ? data.activeId : data.sessions[0].id };
   } catch { return null; }
@@ -76,6 +82,7 @@ function migrateOldBoard(): BoardSession | null {
     return {
       id: makeSessionId(),
       title: board.board.title || '已导入的白板',
+      autoTitlePending: false,
       board,
       createdAt: Date.now(),
       updatedAt: Date.now(),
@@ -111,6 +118,7 @@ export function loadSessions(fallbackBoard: BoardDSL): SessionsData {
   const session: BoardSession = {
     id: makeSessionId(),
     title: fallbackBoard.board.title || '新白板',
+    autoTitlePending: isDefaultBoardTitle(fallbackBoard.board.title) && !fallbackBoard.nodes.length,
     board: fallbackBoard,
     createdAt: Date.now(),
     updatedAt: Date.now(),

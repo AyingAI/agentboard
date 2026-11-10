@@ -1,6 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import { createServer, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import type { BoardNode, DSLPatch } from '../src/types/dsl';
 
 async function streamingAgent(page: Page) {
   const streams: ServerResponse[] = [];
@@ -25,7 +26,7 @@ async function streamingAgent(page: Page) {
   return {
     requests,
     send: (event: unknown) => streams.at(-1)!.write(JSON.stringify(event) + '\n'),
-    finish: (value = { type: 'dsl_patch', summary: '你的想法已整理好', ops: [] }) => { streams.at(-1)!.end(JSON.stringify({ type: 'result', text: JSON.stringify(value) }) + '\n'); },
+    finish: (value: DSLPatch = { type: 'dsl_patch', summary: '你的想法已整理好', ops: [] }) => { streams.at(-1)!.end(JSON.stringify({ type: 'result', text: JSON.stringify(value) }) + '\n'); },
     close: async () => { streams.forEach(stream => stream.destroy()); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); },
   };
 }
@@ -40,13 +41,82 @@ async function submit(page: Page) {
   await expect(page.locator('.run-connection')).toContainText('连接保持中');
 }
 
+const firstCard: BoardNode = { id: 'first-card', type: 'card', title: '三种产品方向对比', body: '比较上手难度、验证成本和复用性。', x: 60, y: 60, width: 320, height: 140 };
+
+test('the first written content names a default board once and persists across canvas undo and reload', async ({ page }) => {
+  const agent = await streamingAgent(page);
+  try {
+    await start(page);
+    await page.getByTitle('新建白板', { exact: true }).click();
+    const title = page.locator('.current-board-title');
+    await expect(title).toHaveText('白板 1');
+
+    await submit(page);
+    agent.finish({ type: 'dsl_patch', summary: '可以比较三个方向。', boardTitle: '仅聊天时给出的标题', ops: [] });
+    await expect(page.locator('.patch-result-toast')).toBeVisible();
+    await expect(title).toHaveText('白板 1');
+
+    await submit(page);
+    agent.finish({ type: 'dsl_patch', summary: '已整理产品方向。', boardTitle: '产品方向与验证计划', ops: [{ op: 'add_node', node: firstCard }] });
+    await expect(title).toHaveText('产品方向与验证计划');
+    await page.locator('.patch-result-toast').getByRole('button', { name: '撤销', exact: true }).click();
+    await expect(page.locator('[data-node-id="first-card"]')).toHaveCount(0);
+
+    await page.reload();
+    await expect(title).toHaveText('产品方向与验证计划');
+    await submit(page);
+    agent.finish({ type: 'dsl_patch', summary: '已补充比较。', boardTitle: '另一个标题', ops: [{ op: 'add_node', node: firstCard }] });
+    await expect(page.locator('[data-node-id="first-card"]')).toBeVisible();
+    await expect(title).toHaveText('产品方向与验证计划');
+    const storedTitle = await page.evaluate(() => {
+      const data = JSON.parse(localStorage.getItem('agentboard.sessions')!);
+      return data.sessions.find((session: { id: string }) => session.id === data.activeId).board.board.title;
+    });
+    expect(storedTitle).toBe('产品方向与验证计划');
+  } finally { await agent.close(); }
+});
+
+test('a reviewed first result names the board from its content only after approval', async ({ page }) => {
+  const agent = await streamingAgent(page);
+  try {
+    await start(page);
+    await submit(page);
+    agent.finish({ type: 'dsl_patch', summary: '准备了对比草稿。', ops: [
+      { op: 'add_node', node: firstCard },
+      { op: 'update_node', nodeId: firstCard.id, changes: { body: '验证需求强度与交付成本。' } },
+    ] });
+    await expect(page.getByRole('button', { name: '确认应用' })).toBeVisible();
+    await expect(page.locator('.current-board-title')).toHaveText('新白板');
+    await page.reload();
+    await page.getByRole('button', { name: '确认应用' }).click();
+    await expect(page.locator('.current-board-title')).toHaveText(firstCard.title);
+  } finally { await agent.close(); }
+});
+
+test('a manual title entered while the first run is pending wins over automatic naming', async ({ page }) => {
+  const agent = await streamingAgent(page);
+  try {
+    await start(page);
+    await submit(page);
+    const title = page.locator('.current-board-title');
+    await title.dblclick();
+    const editor = page.locator('.board-title-edit');
+    await editor.fill('白板 9');
+    await editor.press('Enter');
+    agent.finish({ type: 'dsl_patch', summary: '已整理产品方向。', boardTitle: '产品方向与验证计划', ops: [{ op: 'add_node', node: firstCard }] });
+    await expect(page.locator('[data-node-id="first-card"]')).toBeVisible();
+    await expect(title).toHaveText('白板 9');
+  } finally { await agent.close(); }
+});
+
 test('real streamed activity updates a single composer while the next draft remains editable', async ({ page }) => {
   const agent = await streamingAgent(page);
   try {
     await start(page);
-    await page.screenshot({ animations: 'disabled', path: 'docs/verification/experience-empty.png' });
     await submit(page);
     await expect(page.locator('.empty-board-working')).toBeVisible();
+    const branch = page.locator('.working-branch path').first();
+    await expect.poll(() => branch.evaluate(element => element.getAnimations().some(animation => animation.playState === 'running'))).toBe(true);
     await expect(page.locator('.empty-board-welcome')).toHaveCount(0);
     await expect(page.getByRole('button', { name: '停止生成', exact: true })).toHaveCount(1);
     const input = page.locator('.prompt-bar textarea');
@@ -56,21 +126,18 @@ test('real streamed activity updates a single composer while the next draft rema
     await expect(page.locator('.run-latest-event')).toHaveText('正在阅读材料');
     agent.send({ type: 'progress', event: { type: 'output', message: '正在生成内容', outputChars: 1240, previewTitles: ['方向比较', '关键假设'] } });
     await expect(page.locator('.run-preview')).toContainText('关键假设');
-    await expect(page.locator('.run-output-count')).toHaveText('已接收 1,240 字符 · 1 次工具活动');
     const statusBounds = await page.locator('.agent-run-overlay').boundingBox();
     const inputBounds = await input.boundingBox();
     expect(statusBounds!.y + statusBounds!.height).toBeLessThan(inputBounds!.y);
-    await page.screenshot({ animations: 'disabled', path: 'docs/verification/experience-waiting.png' });
     await page.getByRole('button', { name: '查看执行详情' }).click();
     await expect(page.locator('.run-event-timeline')).toContainText('正在阅读材料');
-    await page.screenshot({ animations: 'disabled', path: 'docs/verification/experience-history.png' });
+    await expect(page.locator('.run-log-metrics')).toHaveText('已接收 1,240 字符 · 1 次工具活动');
     await page.getByRole('button', { name: '关闭活动面板' }).click();
     agent.finish();
     await expect(page.locator('.patch-result-toast')).toBeVisible();
     await expect(input).toHaveValue('接下来重点讨论方案二');
     await expect(page.locator('.agent-run-overlay')).toHaveCount(0);
     await expect(page.getByRole('button', { name: '发送', exact: true })).toBeEnabled();
-    await page.screenshot({ animations: 'disabled', path: 'docs/verification/experience-completed.png' });
   } finally { await agent.close(); }
 });
 
@@ -83,7 +150,6 @@ test('stopping preserves the next draft and retry reuses the original request', 
     await expect(page.getByRole('status', { name: '生成恢复' })).toContainText('已停止这次生成');
     await expect(page.locator('.prompt-bar textarea')).toHaveValue('我的下一步想法');
     expect(agent.requests.length).toBe(1);
-    await page.screenshot({ animations: 'disabled', path: 'docs/verification/experience-stopped.png' });
     await page.getByRole('button', { name: /重新尝试/ }).click();
     await expect.poll(() => agent.requests.length).toBe(2);
     expect(agent.requests[1].userMessage).toContain('比较三种产品方向');
@@ -103,11 +169,10 @@ test('long waits stay honest and reduced motion disables decorative animation', 
     await expect(page.locator('.run-heading-copy')).toContainText('还没有收到可展示的内容');
     await expect(page.locator('.run-connection')).toContainText('等待下一次反馈');
     expect(await page.locator('.run-signal i').first().evaluate(element => getComputedStyle(element).animationName)).toBe('none');
+    expect(await page.locator('.working-branch path').first().evaluate(element => getComputedStyle(element).animationName)).toBe('none');
     await expect(page.locator('.agent-run-overlay')).not.toContainText('%');
     agent.send({ type: 'progress', event: { type: 'heartbeat', message: '本地进程仍在运行' } });
     await expect(page.locator('.run-connection')).toContainText('连接保持中');
-    await expect(page.locator('.run-output-count')).toHaveCount(0);
-    await page.screenshot({ animations: 'disabled', path: 'docs/verification/experience-long-wait.png' });
     agent.finish();
   } finally { await agent.close(); }
 });
@@ -119,7 +184,6 @@ test('failure offers recovery in the composer without losing the request', async
     agent.send({ type: 'error', message: '模型服务暂时不可用，请稍后重试' });
     await expect(page.getByRole('status', { name: '生成恢复' })).toContainText('模型服务暂时不可用');
     await expect(page.locator('.empty-board-welcome')).toBeVisible();
-    await page.screenshot({ animations: 'disabled', path: 'docs/verification/experience-error.png' });
     await page.getByRole('button', { name: '关闭生成提示' }).click();
     await expect(page.getByRole('status', { name: '生成恢复' })).toHaveCount(0);
   } finally { await agent.close(); }
@@ -131,11 +195,10 @@ test('waiting feedback and input fit a compact viewport', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 700 });
     await start(page); await submit(page);
     agent.send({ type: 'progress', event: { type: 'output', message: '生成中', outputChars: 6000, previewTitles: ['一个很长的内容标题，测试在小窗口中的折行和裁剪', '方案比较'] } });
-    await expect(page.locator('.run-output-count')).toBeVisible();
+    await expect(page.locator('.run-preview')).toBeVisible();
     const composer = await page.locator('.composer-wrapper').boundingBox();
     expect(composer!.x).toBeGreaterThanOrEqual(0); expect(composer!.x + composer!.width).toBeLessThanOrEqual(390);
     expect(composer!.y).toBeGreaterThan(0); expect(composer!.y + composer!.height).toBeLessThanOrEqual(700);
-    await page.screenshot({ animations: 'disabled', path: 'docs/verification/experience-compact.png' });
     agent.finish();
   } finally { await agent.close(); }
 });
@@ -173,7 +236,6 @@ test('existing visuals remain interactive while another request is working', asy
     await expect(page.locator('.visual-error')).toHaveCount(0);
     agent.send({ type: 'progress', event: { type: 'output', message: '生成中', outputChars: 2200, previewTitles: ['方向比较', '关键假设'] } });
     await expect(page.locator('.run-preview')).toContainText('关键假设');
-    await page.screenshot({ animations: 'disabled', path: 'docs/verification/experience-existing-visual.png' });
     agent.finish();
     await expect(page.locator('.patch-result-toast')).toBeVisible();
     await expect(frame.locator('#value')).toHaveText('10');

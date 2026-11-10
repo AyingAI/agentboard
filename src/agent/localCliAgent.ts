@@ -21,12 +21,13 @@ async function fetchCLIs(refresh = false, strict = false): Promise<LocalCliInfo[
 }
 
 /** Run a prompt through a local CLI via the dev server bridge */
-async function runLocalCli(
+export async function runLocalCli(
   cliId: string,
   systemPrompt: string,
   userMessage: string,
   externalSignal?: AbortSignal,
   requestProgress?: (event: AgentProgressEvent) => void,
+  purpose?: 'discovery',
 ): Promise<string> {
   let res: Response;
   const { signal, cleanup } = withTimeout(externalSignal, LOCAL_CLI_TIMEOUT_MS);
@@ -42,7 +43,7 @@ async function runLocalCli(
     res = await fetch('/api/agent/run', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ requestId, cliId, systemPrompt, userMessage }),
+      body: JSON.stringify({ requestId, cliId, systemPrompt, userMessage, purpose }),
       signal,
     });
 

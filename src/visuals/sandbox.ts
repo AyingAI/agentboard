@@ -76,10 +76,13 @@ export function buildVisualSandbox(channel: string): string {
   window.addEventListener('message', async event => {
     if (event.source !== parent || !event.data || event.data.channel !== channel) return;
     const msg = event.data;
-    if (msg.type === 'pick') { picking = !!msg.active; document.body.classList.toggle('picking',picking); }
-    if (msg.type === 'restore') { state = copy(msg.state || {}); notify(); restoreInputs(); }
-    if (msg.type !== 'init' || initialized) return;
+    const port = event.ports[0];
+    if (msg.type !== 'init' || initialized || !port) return;
     initialized = true; state = copy(msg.state || {});
+    port.onmessage = ({ data }) => {
+      if (data.type === 'pick') { picking = !!data.active; document.body.classList.toggle('picking',picking); }
+      if (data.type === 'restore') { state = copy(data.state || {}); notify(); restoreInputs(); }
+    };
     // Parse full documents and fragments without interpolating model code into the bootstrap.
     const parsed = new DOMParser().parseFromString(msg.html, 'text/html');
     root.replaceChildren(...Array.from(parsed.head.children), ...Array.from(parsed.body.childNodes));

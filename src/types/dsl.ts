@@ -206,6 +206,8 @@ export interface SpatialPlan {
 export interface DSLPatch {
   type: 'dsl_patch';
   summary: string;
+  /** Suggested name for a new board using its default title. */
+  boardTitle?: string;
   ops: PatchOp[];
   /** Let the host compose ordinary content, or retain meaningful model-authored coordinates. */
   presentation?: { layout: (typeof PRESENTATION_LAYOUTS)[number]; plan?: SpatialPlan };
@@ -374,6 +376,75 @@ export interface AgentConfig {
   baseUrl?: string;
   /** API response budget. Models and compatible endpoints have different limits. */
   maxOutputTokens?: number;
+  /** Optional evaluator; never required by the main Agent. */
+  jev?: { enabled: boolean; apiKey: string; model?: string };
+}
+
+// Proactive collaboration is separate from board patches: discovering is not editing.
+export const DISCOVERY_KINDS = ['connection', 'gap', 'impact', 'next_step'] as const;
+export interface DiscoveryDraft {
+  kind: (typeof DISCOVERY_KINDS)[number];
+  title: string;
+  reason: string;
+  /** An actual prepared comparison, outline or alternative. */
+  prepared: string;
+  nodeIds: string[];
+  action: { label: string; prompt: string };
+}
+export interface DiscoveryResponse {
+  type: 'discovery';
+  understanding: string;
+  discoveries: DiscoveryDraft[];
+  impacts?: ImpactItem[];
+}
+export const IMPACT_STATUSES = ['revise', 'verify', 'keep'] as const;
+export interface ImpactItem {
+  nodeId: string;
+  status: (typeof IMPACT_STATUSES)[number];
+  reason: string;
+  sourceIds: string[];
+}
+export interface ImpactContext {
+  previous?: { goal: string; constraints: string };
+  current: { goal: string; constraints: string };
+  changes: { id: string; title: string; body: string; kind: 'added' | 'edited'; truncated: boolean }[];
+  removedIds: string[];
+  targets: { id: string; title: string; body: string; truncated: boolean; sourceIds: string[] }[];
+}
+export interface ImpactReport { print: string; items: ImpactItem[] }
+export interface Discovery extends DiscoveryDraft {
+  id: string;
+  createdAt: number;
+  status: 'new' | 'saved' | 'dismissed';
+  sourcePrints: Record<string, string>;
+  contextPrint: string;
+  relationPrint: string;
+  savedNodeId?: string;
+  jevReview?: DiscoveryReview;
+}
+export const DISCOVERY_CONCERNS = ['evidence', 'constraints', 'intent', 'repeated'] as const;
+export interface DiscoveryReview { concerns: (typeof DISCOVERY_CONCERNS)[number][] }
+export interface DiscoveryEvaluation {
+  drafts: DiscoveryDraft[];
+  reviews: Record<string, DiscoveryReview>;
+  checked: number;
+  flagged: number;
+  reordered: boolean;
+}
+export interface CollaborationState {
+  enabled?: boolean;
+  goal?: string;
+  constraints?: string;
+  understanding?: string;
+  checkedPrint?: string;
+  checkedAt?: number;
+  checkedNodes?: Record<string, string>;
+  checkedContext?: ImpactContext['current'];
+  impactReport?: ImpactReport;
+  discoveries: Discovery[];
+  budget?: { day: string; calls: number };
+  /** Null means automatic analysis has no daily cap. */
+  dailyLimit?: number | null;
 }
 
 // ── Board session types ──
@@ -386,6 +457,8 @@ export interface AgentTaskPolicy {
   allowFullBoardLayout: boolean;
   /** Explicit host action: infer spatial relationships, with no content operations. */
   layoutOnly?: boolean;
+  /** Let the user review any proposed addition before applying it. */
+  reviewChanges?: boolean;
 }
 
 /** A single event in a run's history — persisted for resumability across refreshes */
@@ -419,6 +492,7 @@ export interface BoardHistory {
 export interface BoardSession {
   id: string;
   title: string;
+  autoTitlePending?: boolean;
   /** An unsent conversation draft belongs to this board. */
   draft?: string;
   board: BoardDSL;
@@ -428,6 +502,7 @@ export interface BoardSession {
   runs?: Record<string, RunState>;
   /** Transaction-level board history, persisted for undo/redo across refreshes. */
   history?: BoardHistory;
+  collaboration?: CollaborationState;
   createdAt: number;
   updatedAt: number;
 }

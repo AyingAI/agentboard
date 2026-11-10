@@ -5,7 +5,8 @@ export type PatchRiskReason =
   | 'delete_group'
   | 'delete_edge'
   | 'rewrite_content'
-  | 'full_board_layout';
+  | 'full_board_layout'
+  | 'suggested_changes';
 
 export interface PatchRiskAssessment {
   requiresConfirmation: boolean;
@@ -33,9 +34,10 @@ function rewritesContent(op: PatchOp) {
       || Object.prototype.hasOwnProperty.call(op.changes, 'visual'));
 }
 
-export function assessPatchRisk(patch: DSLPatch): PatchRiskAssessment {
+export function assessPatchRisk(patch: DSLPatch, reviewChanges = false): PatchRiskAssessment {
   const counts = { ...EMPTY_COUNTS };
   const reasons = new Set<PatchRiskReason>();
+  if (reviewChanges && (patch.ops.length || patch.presentation?.plan)) reasons.add('suggested_changes');
 
   for (const op of patch.ops) {
     counts[op.op] += 1;

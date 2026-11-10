@@ -105,3 +105,7 @@ export const emptyBoard: BoardDSL = {
   groups: [],
   metadata: {},
 };
+
+export function isDefaultBoardTitle(title: string): boolean {
+  return title === emptyBoard.board.title || /^白板 \d+$/.test(title);
+}

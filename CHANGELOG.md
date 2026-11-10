@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.0 — 2026-11-10
+
+- Start with guided topic research or activity and travel planning, or create a freeform board. Collect sources, return to a marked card, and edit or copy a Markdown outline. First-time CLI setup prefers installed Pi and respects saved choices.
+- Analyze committed edits in the background. Show prepared suggestions near the composer and put the full drafts, sources, impact checks, and per-board analysis settings under Agent history. Keep adoption reviewable and undoable.
+- Name default-titled boards when the first content is applied. Generate the title in the same response, preserve manual titles, and keep naming independent of canvas undo.
+- Animate empty-board generation and show concise running feedback beside the composer. Keep detailed activity in history and respect reduced-motion preferences.
+- Add optional Jev review through TypeSafe. Compare candidates with cited sources and constraints, surface potential issues, and continue with the primary agent if the reviewer is unavailable.
+- Restrict local CLI and Jev endpoints to same-origin loopback requests and bound JSON request sizes. Bind visual state delivery to the original sandbox document. Update Vite, Vitest, and vulnerable transitive dependencies.
+- Remove unasserted screenshot captures from the default browser suite. Release checks passed with 266 unit tests, 78 browser tests, a production build, and zero known npm audit findings. Live provider checks remain opt-in.
+
 ## 0.3.7 — 2026-11-01
 
 **Layout now helps explain content.** This release includes the automatic composition work recorded under 0.3.6, which was a development milestone rather than a separate GitHub release.

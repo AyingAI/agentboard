@@ -1,16 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { ActivityEntry, BoardDSL, BoardHistory, BoardSession, RunState } from '../types/dsl';
-import { emptyBoard } from '../data/initialBoard';
+import type { ActivityEntry, BoardDSL, BoardHistory, BoardSession, CollaborationState, RunState } from '../types/dsl';
+import { emptyBoard, isDefaultBoardTitle } from '../data/initialBoard';
 import { loadSessions, saveSessions } from '../storage';
 
 function makeId(): string {
   return `session_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
 }
 
-function newSession(board: BoardDSL): BoardSession {
+function newSession(board: BoardDSL, autoTitlePending = false): BoardSession {
   return {
     id: makeId(),
     title: board.board.title || '新白板',
+    autoTitlePending,
     board,
     createdAt: Date.now(),
     updatedAt: Date.now(),
@@ -54,24 +55,29 @@ export function useBoardSessions() {
   const createSession = useCallback(() => {
     const data = latest.current;
     const freshBoard = JSON.parse(JSON.stringify(emptyBoard)) as BoardDSL;
-    // Auto-name with sequential number
-    const existing = data.sessions.filter((s) => s.title.startsWith('白板'));
-    const num = existing.length + 1;
+    const titles = new Set(data.sessions.map(session => session.title));
+    let num = 1;
+    while (titles.has(`白板 ${num}`)) num += 1;
     freshBoard.board.title = `白板 ${num}`;
-    const session = newSession(freshBoard);
+    const session = newSession(freshBoard, true);
     persist({
       sessions: [...data.sessions, session],
       activeId: session.id,
     });
   }, [data, persist]);
 
-  const createSessionFromBoard = useCallback((board: BoardDSL, title?: string) => {
+  const createSessionFromBoard = useCallback((board: BoardDSL, title?: string, replaceEmpty = false) => {
     const data = latest.current;
     const importedBoard = structuredClone(board);
     if (title?.trim()) importedBoard.board.title = title.trim();
     const session = newSession(importedBoard);
+    const current = data.sessions.find(item => item.id === data.activeId);
+    const replace = replaceEmpty && current?.board.board.id === emptyBoard.board.id
+      && current.autoTitlePending && isDefaultBoardTitle(current.title)
+      && !current.board.nodes.length && !Object.keys(current.board.metadata).length
+      && !current.draft?.trim() && !current.activities?.length && !current.history?.past.length && !current.history?.future.length;
     persist({
-      sessions: [...data.sessions, session],
+      sessions: replace ? data.sessions.map(item => item.id === current.id ? session : item) : [...data.sessions, session],
       activeId: session.id,
     });
     return session.id;
@@ -102,7 +108,7 @@ export function useBoardSessions() {
       persist({
         ...data,
         sessions: data.sessions.map((s) =>
-          s.id === id ? { ...s, title: trimmed, board: { ...s.board, board: { ...s.board.board, title: trimmed } }, updatedAt: Date.now() } : s,
+          s.id === id ? { ...s, title: trimmed, autoTitlePending: false, board: { ...s.board, board: { ...s.board.board, title: trimmed } }, updatedAt: Date.now() } : s,
         ),
         activeId: data.activeId,
       });
@@ -124,20 +130,28 @@ export function useBoardSessions() {
   );
 
   const updateActiveBoard = useCallback(
-    (board: BoardDSL, history?: BoardHistory) => {
+    (board: BoardDSL, history?: BoardHistory, suggestedTitle?: string) => {
       const data = latest.current;
+      const session = data.sessions.find(s => s.id === data.activeId);
+      if (!session) return board;
+      const generatedTitle = session.autoTitlePending && isDefaultBoardTitle(session.title) ? suggestedTitle : undefined;
+      const title = generatedTitle ?? session.title;
+      const nextBoard = board.board.title === title ? board : { ...board, board: { ...board.board, title } };
       persist({
         ...data,
         sessions: data.sessions.map((s) =>
           s.id === data.activeId ? {
             ...s,
-            board,
+            board: nextBoard,
+            title,
+            autoTitlePending: generatedTitle ? false : s.autoTitlePending,
             history: history ?? s.history,
             updatedAt: Date.now(),
           } : s,
         ),
         activeId: data.activeId,
       });
+      return nextBoard;
     },
     [data, persist],
   );
@@ -168,6 +182,13 @@ export function useBoardSessions() {
     draftSaveTimer.current = setTimeout(() => persist(latest.current), 300);
   }, [persist]);
 
+  const updateCollaboration = useCallback((sessionId: string, update: (current: CollaborationState) => CollaborationState) => {
+    const data = latest.current;
+    if (!data.sessions.some(session => session.id === sessionId)) return;
+    persist({ ...data, sessions: data.sessions.map(session => session.id === sessionId
+      ? { ...session, collaboration: update(session.collaboration ?? { discoveries: [] }) } : session) });
+  }, [persist]);
+
   return {
     sessions,
     activeId,
@@ -183,5 +204,6 @@ export function useBoardSessions() {
     updateActiveBoard,
     updateActiveAgentState,
     updateActiveDraft,
+    updateCollaboration,
   };
 }

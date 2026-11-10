@@ -88,7 +88,6 @@ test('interacting inside a visual dismisses the host menu without blocking the c
 
 test('composer has a spacious input, a clear send action and a dismissible permissions popover', async ({ page }) => {
   await start(page, true);
-  await page.screenshot({ animations: 'disabled', path: 'docs/verification/composer-v034-idle.png' });
   const input = page.locator('.prompt-bar textarea');
   await expect(page.getByRole('button', { name: '展开输入', exact: true })).toBeVisible();
   expect((await input.boundingBox())!.height).toBeLessThanOrEqual(52);
@@ -101,21 +100,17 @@ test('composer has a spacious input, a clear send action and a dismissible permi
   const permission = page.getByRole('dialog', { name: 'Agent 修改权限', exact: true });
   await expect(permission).toBeVisible(); await expect(permission.getByLabel('修改现有内容', { exact: false })).toBeChecked();
   await permission.getByRole('checkbox', { name: /删除内容/ }).check();
-  await page.screenshot({ animations: 'disabled', path: 'docs/verification/composer-v034-permissions.png' });
   await page.keyboard.press('Escape');
   await expect(permission).toHaveCount(0); await expect(page.getByRole('button', { name: '修改权限', exact: true })).toBeFocused();
   await page.getByRole('button', { name: '修改权限', exact: true }).click();
   await input.click(); await expect(permission).toHaveCount(0); await expect(input).toBeFocused();
   await expect(input).toHaveValue('把这个想法变成一个可以比较和试验的方案');
-  await page.screenshot({ animations: 'disabled', path: 'docs/verification/composer-v034-writing.png' });
-  await page.locator('.composer-v4').screenshot({ animations: 'disabled', path: 'docs/verification/composer-v034-detail.png' });
 });
 
 test('selected context and small screens float over a full-height canvas', async ({ page }) => {
   await start(page, true); await page.locator('[data-node-id="sample"] > h2').click();
   await page.locator('.prompt-bar textarea').click();
   await expect(page.locator('.prompt-scope-button')).toHaveText('产品实验');
-  await page.screenshot({ animations: 'disabled', path: 'docs/verification/composer-v034-selection.png' });
   await page.setViewportSize({ width: 390, height: 720 });
   await page.locator('.prompt-bar textarea').fill('这是一段比较长的想法。\n希望保留足够的空间，让我可以舒服地组织内容。');
   const bounds = await page.evaluate(() => {
@@ -128,7 +123,6 @@ test('selected context and small screens float over a full-height canvas', async
   const popup = (await page.getByRole('dialog', { name: 'Agent 修改权限' }).boundingBox())!;
   expect(popup.x).toBeGreaterThanOrEqual(0); expect(popup.x + popup.width).toBeLessThanOrEqual(390); expect(popup.y).toBeGreaterThanOrEqual(0);
   await page.keyboard.press('Escape');
-  await page.screenshot({ animations: 'disabled', path: 'docs/verification/composer-v034-mobile.png' });
 });
 
 test('composition and permission keys never send a draft, while Enter and the send button work once', async ({ page }) => {

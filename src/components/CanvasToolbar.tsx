@@ -3,6 +3,7 @@ import { useDismissibleLayer } from '../hooks/useDismissibleLayer';
 
 interface CanvasToolbarProps {
   zoom: number;
+  createLabel?: string;
   hasContent: boolean;
   onCreateNode: () => void;
   onZoomIn: () => void;
@@ -18,6 +19,7 @@ interface CanvasToolbarProps {
 
 export default function CanvasToolbar({
   zoom,
+  createLabel = '+ 卡片',
   hasContent,
   onCreateNode,
   onZoomIn,
@@ -35,7 +37,7 @@ export default function CanvasToolbar({
   useDismissibleLayer({ open, root, onDismiss: () => setOpen(false) });
   return (
     <div className="canvas-toolbar" aria-label="画布工具">
-      <button type="button" className="canvas-toolbar-create" onClick={onCreateNode}>+ 卡片</button>
+      <button type="button" className="canvas-toolbar-create" onClick={onCreateNode}>{createLabel}</button>
       <span className="canvas-toolbar-divider" />
       <button type="button" onClick={onZoomOut} aria-label="缩小画布" title="缩小">−</button>
       <button type="button" className="canvas-zoom-value" onClick={onResetView} title="重置为 100%">

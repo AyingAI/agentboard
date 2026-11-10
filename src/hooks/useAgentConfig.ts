@@ -53,5 +53,9 @@ export function useAgentConfig() {
     });
   }, []);
 
-  return { config, setProvider, setApiKey, setModel, setCliId, setBaseUrl, setMaxOutputTokens };
+  const setJev = useCallback((jev: AgentConfig['jev']) => {
+    setConfig(prev => { const next = { ...prev, jev }; saveAgentConfig(next); return next; });
+  }, []);
+
+  return { config, setProvider, setApiKey, setModel, setCliId, setBaseUrl, setMaxOutputTokens, setJev };
 }

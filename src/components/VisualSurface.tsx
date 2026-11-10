@@ -23,6 +23,7 @@ export default function VisualSurface(props: Props) {
   const [error, setError] = useState<string | null>(null);
   const [generation, setGeneration] = useState(0);
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const portRef = useRef<MessagePort | null>(null);
   const latest = useRef(props);
   latest.current = props;
   const lastState = useRef('');
@@ -31,22 +32,28 @@ export default function VisualSurface(props: Props) {
   const contractError = visualError(visual);
 
   function post(message: Record<string, unknown>) {
-    iframeRef.current?.contentWindow?.postMessage({ channel, ...message }, '*');
+    portRef.current?.postMessage(message);
   }
 
-  function initialize() {
-    lastState.current = JSON.stringify(latest.current.visual.state ?? {});
-    post({ type: 'init', html: latest.current.visual.html, state: latest.current.visual.state ?? {} });
-  }
-
-  useEffect(() => {
+  useLayoutEffect(() => {
     setError(null); setStatus('loading'); setPicking(false);
     const timer = window.setTimeout(() => {
       setError('视觉加载较久，可以重新运行，或引用此视觉让 Agent 修复。');
     }, 15000);
     function receive(event: MessageEvent) {
-      if (event.source !== iframeRef.current?.contentWindow || event.data?.channel !== channel) return;
+      const frame = iframeRef.current?.contentWindow;
+      if (!frame || event.source !== frame || event.origin !== 'null' || event.data?.channel !== channel) return;
       const msg = event.data;
+      if (msg.type === 'ready' && !portRef.current) {
+        const { port1, port2 } = new MessageChannel();
+        portRef.current = port1;
+        const { html, state = {} } = latest.current.visual;
+        lastState.current = JSON.stringify(state);
+        // The port stays with the trusted bootstrap document even if the iframe navigates.
+        frame.postMessage({ channel, type: 'init', html, state }, '*', [port2]);
+        return;
+      }
+      if (!portRef.current) return;
       if (msg.type === 'rendered') { clearTimeout(timer); setStatus('painting'); }
       if (msg.type === 'error') { clearTimeout(timer); setError(String(msg.message).slice(0, 500)); }
       if (msg.type === 'state' && validVisualState(msg.state)) {
@@ -69,7 +76,12 @@ export default function VisualSurface(props: Props) {
       }
     }
     window.addEventListener('message', receive);
-    return () => { clearTimeout(timer); window.removeEventListener('message', receive); };
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('message', receive);
+      portRef.current?.close();
+      portRef.current = null;
+    };
   }, [channel, nodeId]);
 
   useLayoutEffect(() => {
@@ -125,10 +137,10 @@ export default function VisualSurface(props: Props) {
       </div>
       {contractError ? <div className="visual-error" role="alert">{contractError}</div> : (
         <div className={`visual-frame${status === 'loading' && !error ? ' is-loading' : ''}${status === 'painting' && !error ? ' is-preparing' : ''}`} aria-busy={status !== 'ready'}>
-          <iframe ref={iframeRef} title={`${title} · 交互内容`} srcDoc={srcDoc}
+          <iframe key={channel} ref={iframeRef} title={`${title} · 交互内容`} srcDoc={srcDoc}
             sandbox="allow-scripts" referrerPolicy="no-referrer" tabIndex={status !== 'ready' ? -1 : 0}
             allow="camera 'none'; microphone 'none'; geolocation 'none'; clipboard-read 'none'; clipboard-write 'none'"
-            onLoad={initialize} style={{ height: expanded ? undefined : (visual.height ?? 420) }} />
+            style={{ height: expanded ? undefined : (visual.height ?? 420) }} />
           {status !== 'ready' && !error ? <div className="visual-loading" role="status"><span aria-hidden="true" />正在准备交互内容</div> : null}
         </div>
       )}

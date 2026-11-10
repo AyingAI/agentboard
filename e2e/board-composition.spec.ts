@@ -65,12 +65,10 @@ test('legacy staircase is repaired once with readable sections, persistent visua
   expect(await collisionCount(page)).toBe(0);
   expect(await collisionCount(page, '.group-boundary')).toBe(0);
   expect(Number((await page.locator('.canvas-zoom-value').innerText()).replace('%', ''))).toBeGreaterThanOrEqual(80);
-  await page.screenshot({ path: 'docs/verification/composition-v036-reading.png', animations: 'disabled' });
   await page.getByRole('button', { name: '总览', exact: true }).click();
   const canvas = (await page.locator('.board-canvas').boundingBox())!;
   const boxes = await page.locator('.group-boundary').evaluateAll(es => es.map(e => { const b = e.getBoundingClientRect(); return { x: b.x, y: b.y, right: b.right, bottom: b.bottom }; }));
   for (const box of boxes) { expect(box.x).toBeGreaterThanOrEqual(canvas.x); expect(box.right).toBeLessThanOrEqual(canvas.x + canvas.width); expect(box.y).toBeGreaterThanOrEqual(canvas.y); expect(box.bottom).toBeLessThan(canvas.y + canvas.height); }
-  await page.screenshot({ path: 'docs/verification/composition-v036-overview.png', animations: 'disabled' });
   await expect(page.getByRole('button', { name: '进入板块：找到值得验证的方向', exact: true })).toBeVisible();
   await page.getByRole('button', { name: '进入板块：找到值得验证的方向', exact: true }).click();
   await expect(page.locator('.board-overview-labels')).toHaveCount(0);
@@ -143,9 +141,7 @@ test('branched flows use measured directional layers and section navigation fits
   }
   expect(await collisionCount(page)).toBe(0);
   await page.getByRole('button', { name: '总览', exact: true }).click();
-  await page.screenshot({ path: 'docs/verification/composition-v036-flow.png', animations: 'disabled' });
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.screenshot({ path: 'docs/verification/composition-v036-mobile.png', animations: 'disabled' });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await expect(page.getByRole('button', { name: '智能布局', exact: true })).toBeVisible();
 });

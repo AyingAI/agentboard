@@ -7,6 +7,8 @@ import { OpenAIAgentAdapter } from '../agent/openaiAgent';
 import { applyPatch } from '../engine/patch';
 import SettingsSelect from './SettingsSelect';
 import './settings.css';
+import JevSettings from './JevSettings';
+import { availableClis as detectedClis, recommendedCli } from '../agent/onboarding';
 
 type ModelOption = {
   value: string;
@@ -21,6 +23,7 @@ interface AgentConfigPanelProps {
   onSetCliId: (cliId: string) => void;
   onSetBaseUrl: (url: string) => void;
   onSetMaxOutputTokens: (value: number) => void;
+  onSetJev: (value: AgentConfig['jev']) => void;
   onClose: () => void;
 }
 
@@ -133,6 +136,7 @@ export default function AgentConfigPanel({
   onSetCliId,
   onSetBaseUrl,
   onSetMaxOutputTokens,
+  onSetJev,
   onClose,
 }: AgentConfigPanelProps) {
   const [clis, setClis] = useState<LocalCliInfo[]>([]);
@@ -168,12 +172,16 @@ export default function AgentConfigPanel({
     setModelFetchState({ status: 'idle' });
   }, [config.provider, config.baseUrl, config.apiKey]);
 
-  const availableClis = clis.filter((c) => c.available);
+  const availableClis = detectedClis(clis);
+  const suggestedCli = recommendedCli(clis);
+  useEffect(() => {
+    if (config.provider === 'local-cli' && !config.cliId && suggestedCli) onSetCliId(suggestedCli.id);
+  }, [config.provider, config.cliId, suggestedCli?.id, onSetCliId]);
   const selectedCli = availableClis.find(cli => cli.id === config.cliId);
   const cliOptions = availableClis.map(cli => ({
     value: cli.id, label: cli.name,
     badge: cli.version?.match(/\d+\.\d+\.\d+(?:-[\da-zA-Z.-]+)?/)?.[0],
-    description: (cli.installations?.length ?? 0) > 1 ? `发现 ${cli.installations!.length} 份安装 · ${cli.version ? '已选择可识别的较新版本' : '按终端路径选择'}` : '沿用本机登录与配置',
+    description: cli.id === 'pi' ? '推荐 · 沿用本机登录与配置' : (cli.installations?.length ?? 0) > 1 ? `发现 ${cli.installations!.length} 份安装 · ${cli.version ? '已选择可识别的较新版本' : '按终端路径选择'}` : '沿用本机登录与配置',
   }));
   if (config.cliId && !selectedCli && !loadingClis) cliOptions.unshift({ value: config.cliId, label: `${config.cliId} · 当前未找到`, badge: undefined, description: '请重新检测或选择其他工具' });
   const currentModelSourceKey = modelSourceKey(config.provider, config.baseUrl);
@@ -322,9 +330,9 @@ export default function AgentConfigPanel({
         </label>
 
         <section className={`provider-recommendation ${config.provider === 'local-cli' ? 'selected' : ''}`}>
-          <strong>{config.provider === 'local-cli' ? '当前为推荐模式' : '推荐优先使用本地 CLI'}</strong>
+          <strong>{config.provider === 'local-cli' ? '优先推荐 Pi，也可使用已有的 Agent' : '使用你选择的模型服务'}</strong>
           <p>
-            {config.provider === 'local-cli' ? '复用本机已有的模型、认证和工具。检测到多份安装时，优先使用可识别的较新版本。' : '直接连接模型服务。你可以选择模型、调整输出空间，并让它自由生成交互视觉。'}
+            {config.provider === 'local-cli' ? '选择已安装并登录的工具即可开始；会保留你已选的 Agent。' : '填写服务地址与密钥，即可使用所选模型。'}
           </p>
         </section>
 
@@ -345,7 +353,7 @@ export default function AgentConfigPanel({
             </details> : null}
             {!loadingClis && !cliError && availableClis.length === 0 && (
               <span className="config-hint">
-                未检测到受支持的本地 CLI。当前支持 Claude Code、OpenCode、Pi CLI、Codex CLI、Gemini CLI、Antigravity、Qwen Code、Cursor Agent、GitHub Copilot CLI、Qoder、Kimi 和 Trae。
+                未检测到本地 Agent。可先安装并登录 Pi，再点击“重新检测”；也可以在上方切换到 API。
               </span>
             )}
           </div>
@@ -430,6 +438,7 @@ export default function AgentConfigPanel({
             <span className="config-hint">复杂交互视觉需要更多输出空间，请按所选模型支持的上限调整。</span>
           </details>
         </> : null}
+        <JevSettings value={config.jev} onChange={onSetJev} />
         <p className="config-note">
           {config.provider === 'local-cli'
             ? '通过本地 CLI 调用 Agent，复用已有配置和认证。'

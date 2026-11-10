@@ -30,6 +30,7 @@ import { assessPatchRisk, type PatchRiskAssessment } from '../agent/patchRisk';
 import { summarizePatchChanges, type PatchChangeSummary } from '../agent/patchSummary';
 import { validatePatchPolicy } from '../agent/taskPolicy';
 import { clearPendingProposals, restorePendingProposal } from '../agent/proposals';
+import { firstBoardTitle } from '../agent/firstBoardTitle';
 
 export type AppliedAgentPatch = {
   id: string;
@@ -58,6 +59,7 @@ export type InteractionDecision = {
 type UseAgentOptions = {
   sessionId?: string;
   getRecentEditEvents?: () => BoardEditEvent[];
+  getProjectContext?: () => string;
   onAgentPatchApplied?: (patch: DSLPatch, beforeBoard: BoardDSL) => void;
   initialActivities?: ActivityEntry[];
   initialRuns?: Record<string, RunState>;
@@ -166,7 +168,7 @@ class NoAgentAdapter implements AgentAdapter {
 
 export function useAgent(
   getBoard: () => BoardDSL,
-  setBoard: (board: BoardDSL) => void,
+  setBoard: (board: BoardDSL, suggestedTitle?: string) => BoardDSL,
   config: AgentConfig,
   options: UseAgentOptions = {},
 ) {
@@ -280,7 +282,7 @@ export function useAgent(
 
       const request: AgentRequest = {
         boardState: access.current.getBoard(),
-        userMessage,
+        userMessage: taskPolicy?.layoutOnly ? userMessage : [userMessage, access.current.options.getProjectContext?.()].filter(Boolean).join('\n\n'),
         runId: run.id,
         runContext: [...conversationEvents(runs, run.id), ...run.events],
         recentEditEvents: options.getRecentEditEvents?.() ?? [],
@@ -363,7 +365,7 @@ export function useAgent(
 
         const currentBoard = access.current.getBoard();
         const patch = preserveVisualState(currentBoard, normalizePatchForUserIntent(response, userMessage, currentBoard));
-        if (patchConflicts(request.boardState, currentBoard, patch).length) {
+        if (patchConflicts(request.boardState, currentBoard, patch, taskPolicy?.reviewChanges ? taskPolicy.selectedNodeIds : []).length) {
           throw { code: 'API_ERROR', message: '相关内容在 Agent 工作期间发生了变化，已保留你的编辑。请基于当前状态重新发送。', retryable: false } satisfies AgentError;
         }
         updateRunProgress(progressActivity.id, {
@@ -420,7 +422,7 @@ export function useAgent(
           activeStepId: 'apply',
         });
 
-        const risk = assessPatchRisk(patch);
+        const risk = assessPatchRisk(patch, taskPolicy?.reviewChanges);
         if (risk.requiresConfirmation) {
           const proposal: PendingAgentPatch = {
             id: `proposal_${Date.now()}_${Math.random().toString(16).slice(2)}`,
@@ -434,7 +436,7 @@ export function useAgent(
           const { risk: _risk, runId: _runId, ...persistedProposal } = proposal;
           setRuns(previous => ({ ...clearPendingProposals(previous), [run.id]: { ...previous[run.id], pendingProposal: persistedProposal } }));
           updateRunProgress(progressActivity.id, {
-            summary: `[${providerName}] 等待确认高风险修改`,
+            summary: `[${providerName}] 等待确认修改建议`,
             detail: `已校验 ${result.appliedOps} 个修改，但尚未应用到白板。`,
             status: 'completed',
             activeStepId: 'apply',
@@ -443,7 +445,9 @@ export function useAgent(
           return;
         }
 
-        if (patch.ops.length || patch.presentation?.plan) access.current.setBoard(resultBoard);
+        const committedBoard = patch.ops.length || patch.presentation?.plan
+          ? access.current.setBoard(resultBoard, firstBoardTitle(currentBoard, resultBoard, patch.boardTitle, run.originalUserMessage))
+          : resultBoard;
         setAppliedPatch({
           id: `applied_${Date.now()}_${Math.random().toString(16).slice(2)}`,
           runId: run.id,
@@ -451,7 +455,7 @@ export function useAgent(
           patch,
           summary: summarizePatchChanges(patch, resultBoard),
           beforeBoard: currentBoard,
-          afterBoard: resultBoard,
+          afterBoard: committedBoard,
         });
         options.onAgentPatchApplied?.(patch, currentBoard);
         const patchEvent: AgentRunEvent = {
@@ -617,7 +621,8 @@ export function useAgent(
   const applyPendingPatch = useCallback(() => {
     if (!pendingPatch) return;
     const currentBoard = getBoard();
-    if (patchConflicts(pendingPatch.baseBoard, currentBoard, pendingPatch.patch).length) {
+    const policy = runs[pendingPatch.runId]?.taskPolicy;
+    if (patchConflicts(pendingPatch.baseBoard, currentBoard, pendingPatch.patch, policy?.reviewChanges ? policy.selectedNodeIds : []).length) {
       addActivity(makeActivity('validation_error', '提案涉及的内容已改变，未覆盖你的编辑。请让 Agent 基于当前状态重新生成。'));
       setPendingPatch(null);
       setRuns(clearPendingProposals);
@@ -638,7 +643,7 @@ export function useAgent(
       setRuns(clearPendingProposals);
       return;
     }
-    setBoard(nextBoard);
+    const committedBoard = setBoard(nextBoard, firstBoardTitle(currentBoard, nextBoard, pendingPatch.patch.boardTitle, runs[pendingPatch.runId]?.originalUserMessage));
     setRuns(clearPendingProposals);
     setAppliedPatch({
       id: `applied_${Date.now()}_${Math.random().toString(16).slice(2)}`,
@@ -647,7 +652,7 @@ export function useAgent(
       patch: pendingPatch.patch,
       summary: summarizePatchChanges(pendingPatch.patch, nextBoard),
       beforeBoard: currentBoard,
-      afterBoard: nextBoard,
+      afterBoard: committedBoard,
     });
     options.onAgentPatchApplied?.(pendingPatch.patch, currentBoard);
     const patchEvent: AgentRunEvent = {
@@ -673,7 +678,7 @@ export function useAgent(
       ...items,
     ]);
     setPendingPatch(null);
-  }, [getBoard, options, pendingPatch, providerName, setBoard]);
+  }, [getBoard, options, pendingPatch, providerName, runs, setBoard]);
 
   const rejectPendingPatch = useCallback(() => {
     if (!pendingPatch) return;

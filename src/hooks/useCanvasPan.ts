@@ -18,8 +18,8 @@ export function useCanvasPan() {
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       if (e.code === 'Space' && !e.repeat) {
-        const tag = (e.target as HTMLElement)?.tagName;
-        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+        const target = e.target instanceof Element ? e.target : null;
+        if (e.defaultPrevented || target?.closest('input, textarea, select, button, summary, [contenteditable="true"], [aria-modal="true"]')) return;
         e.preventDefault();
         setSpaceHeld(true);
       }

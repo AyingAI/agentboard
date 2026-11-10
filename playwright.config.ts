@@ -5,14 +5,14 @@ export default defineConfig({
   fullyParallel: true,
   timeout: 30000,
   use: {
-    baseURL: 'http://127.0.0.1:5173',
+    baseURL: 'http://localhost:5173',
     viewport: { width: 1440, height: 1000 },
     channel: process.platform === 'darwin' ? 'chrome' : undefined,
     trace: 'retain-on-failure',
   },
   webServer: {
-    command: 'npm run dev -- --host 127.0.0.1',
-    url: 'http://127.0.0.1:5173',
+    command: 'npm run dev -- --host localhost --port 5173 --strictPort',
+    url: 'http://localhost:5173',
     reuseExistingServer: !process.env.CI,
   },
 });
