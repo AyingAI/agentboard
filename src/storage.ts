@@ -3,6 +3,7 @@ import type { AgentConfig } from './types/dsl';
 import { validateBoard } from './engine/validation';
 import { boardVisualErrors } from './visuals/contract';
 import { applyVisualPatch } from './visuals/patch';
+import { normalizeJevConfig } from './agent/jevConfig';
 import { restoreCollaboration } from './agent/discoveries';
 import { emptyBoard, isDefaultBoardTitle } from './data/initialBoard';
 
@@ -51,6 +52,11 @@ function readSessions(raw: string | null): SessionsData | null {
           if (proposal) {
             try {
               if (typeof proposal.id !== 'string' || typeof proposal.activityId !== 'string' || !validBoard(proposal.baseBoard) || !applyVisualPatch(proposal.baseBoard, proposal.patch).result.applied) delete run.pendingProposal;
+              if (typeof proposal.evidenceSourceId !== 'string') delete proposal.evidenceSourceId;
+              if (typeof proposal.projectContext !== 'string') delete proposal.projectContext;
+              if (typeof proposal.evidenceNote !== 'string') delete proposal.evidenceNote;
+              if (Array.isArray(proposal.evidenceIssues)) proposal.evidenceIssues = proposal.evidenceIssues.filter(issue => issue && typeof issue.nodeId === 'string' && typeof issue.sourceTitle === 'string' && typeof issue.text === 'string');
+              else delete proposal.evidenceIssues;
             } catch { delete run.pendingProposal; }
           }
           return [id, run];
@@ -156,12 +162,16 @@ export function loadAgentConfig(): AgentConfig {
   try {
     const raw = localStorage.getItem(CONFIG_KEY);
     if (!raw) return DEFAULT_CONFIG;
-    return JSON.parse(raw) as AgentConfig;
+    const config = JSON.parse(raw) as AgentConfig;
+    const next = { ...config, jev: normalizeJevConfig(config.jev) };
+    // Persist once; failure to save must not discard a usable connection.
+    if (JSON.stringify(next) !== raw) { try { saveAgentConfig(next); } catch { /* Read-only storage. */ } }
+    return next;
   } catch {
     return DEFAULT_CONFIG;
   }
 }
 
 export function saveAgentConfig(config: AgentConfig): void {
-  localStorage.setItem(CONFIG_KEY, JSON.stringify(config));
+  localStorage.setItem(CONFIG_KEY, JSON.stringify({ ...config, jev: normalizeJevConfig(config.jev) }));
 }

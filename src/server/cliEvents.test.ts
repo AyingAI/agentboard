@@ -1,7 +1,24 @@
 import { describe, expect, it } from 'vitest';
-import { readCliEvent, type CliOutputState } from './cliEvents';
+import { cliFailure, readCliEvent, type CliOutputState } from './cliEvents';
 const state = (): CliOutputState => ({ partialText: '', assistantText: '', resultText: '', outputChars: 0, lastOutputSentAt: 0, seenTools: new Set() });
 describe('CLI event sanitization', () => {
+  it('retains a typed Pi provider failure even when print-mode JSON exits successfully', () => {
+    const value = state();
+    readCliEvent('pi', JSON.stringify({ type: 'message_end', message: { role: 'assistant', stopReason: 'error', content: [],
+      errorMessage: '429: inference overloaded SECRET-CREDENTIAL' } }), value);
+    expect(value.failure).toEqual({ code: 'RATE_LIMITED', message: 'Agent 服务暂时限流，请稍后重试。', retryable: false });
+    expect(JSON.stringify(value)).not.toContain('SECRET-CREDENTIAL');
+    readCliEvent('pi', '{"type":"message_start","message":{"role":"assistant"}}', value);
+    expect(value.failure).toBeUndefined();
+    expect(cliFailure('401 key=SECRET').code).toBe('AUTH_ERROR');
+    expect(cliFailure('fetch failed SECRET').code).toBe('NETWORK_ERROR');
+    expect(cliFailure('timeout SECRET').code).toBe('TIMEOUT');
+  });
+  it('tracks provider retries without exposing the provider error payload', () => {
+    const value = state();
+    expect(readCliEvent('pi', '{"type":"auto_retry_start","attempt":2,"errorMessage":"SECRET"}', value))
+      .toEqual([{ type: 'working', message: '服务暂时繁忙，正在进行第 2 次重试', retryAttempt: 2 }]);
+  });
   it('Pi collects text deltas and authoritative final text while omitting hidden thinking and tool payloads', () => {
     const value = state();
     const read = (event: unknown) => readCliEvent('pi', JSON.stringify(event), value);

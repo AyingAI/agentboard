@@ -1,6 +1,7 @@
-import { DISCOVERY_KINDS, DISCOVERY_CONCERNS, IMPACT_STATUSES, type BoardDSL, type CollaborationState, type Discovery, type DiscoveryDraft, type DiscoveryResponse, type DiscoveryReview, type ImpactContext, type ImpactItem } from '../types/dsl';
+import { DISCOVERY_KINDS, DISCOVERY_CONCERNS, IMPACT_STATUSES, type BoardDSL, type CollaborationState, type Discovery, type DiscoveryDraft, type DiscoveryResponse, type DiscoveryReview, type ImpactContext, type ImpactCoverage, type ImpactItem } from '../types/dsl';
 import { getJsonCandidates } from './response';
 import { readExploration } from '../data/exploration';
+import { selectImpactTargets } from './impactCandidates';
 
 export const EMPTY_COLLABORATION: CollaborationState = { discoveries: [] };
 
@@ -35,27 +36,41 @@ export function buildImpactContext(board: BoardDSL, state: CollaborationState): 
 
   const saved = new Map(state.discoveries.filter(d => d.status === 'saved' && d.savedNodeId).map(d => [d.savedNodeId, d]));
   const changedIds = new Set([...changed.map(node => node.id), ...removedIds]);
-  const targets = board.nodes.flatMap(node => {
+  const candidates = board.nodes.flatMap(node => {
     const adopted = saved.get(node.id);
     const isOutcome = node.tags?.some(tag => tag === 'output' || tag === 'decision' || tag === 'assumption');
-    if (!knownIds.has(node.id) || (!adopted && !isOutcome)) return [];
+    // Untagged execution cards are readable candidates too. Materials stay read-only.
+    if (node.visual || node.tags?.some(tag => ['material', 'evidence', 'source'].includes(tag))
+      || !adopted && !isOutcome && (node.tags?.includes('question') || !node.body.trim())) return [];
+    // An upstream edit or project constraint change cannot make a user's fresh edit a write target.
+    if (knownIds.has(node.id) && changedIds.has(node.id)) return [];
     const sourceIds = [...new Set([...(adopted?.nodeIds ?? []), ...board.edges.filter(edge => edge.to === node.id).map(edge => edge.from)])]
       .sort((a, b) => Number(changedIds.has(b)) - Number(changedIds.has(a))).slice(0, 12);
     if (!contextChanged && changedIds.has(node.id) && !sourceIds.some(id => changedIds.has(id))) return [];
-    return [{ id: node.id, title: node.title.slice(0, 240), body: node.body.slice(0, 2400), truncated: node.body.length > 2400, sourceIds,
-      rank: sourceIds.some(id => changedIds.has(id)) ? 2 : adopted ? 1 : 0 }];
-  }).sort((a, b) => b.rank - a.rank).slice(0, 6).map(({ rank: _rank, ...target }) => target);
-  if (!targets.length) return;
+    return [{ id: node.id, title: node.title.slice(0, 240), body: node.body.slice(0, 7000), truncated: node.body.length > 7000, sourceIds,
+      rank: sourceIds.some(id => changedIds.has(id)) ? 3 : adopted ? 2 : isOutcome ? 1 : 0 }];
+  }).sort((a, b) => b.rank - a.rank).map(({ rank: _rank, ...target }) => target);
+  if (!candidates.length) return;
 
-  const linked = new Set(targets.flatMap(target => target.sourceIds));
+  const linked = new Set(candidates.flatMap(target => target.sourceIds));
   const changes: ImpactContext['changes'] = [...changed].reverse().sort((a, b) => Number(linked.has(b.id)) - Number(linked.has(a.id)))
     .slice(0, 8).map(node => ({ id: node.id, title: node.title.slice(0, 240), body: node.body.slice(0, 2000), truncated: node.body.length > 2000,
       kind: knownIds.has(node.id) ? 'edited' : 'added' }));
-  return { previous, current, targets, changes, removedIds: removedIds.filter(id => linked.has(id)).slice(0, 12) };
+  const targets = selectImpactTargets(candidates, changes);
+  const selectedSources = new Set(targets.flatMap(target => target.sourceIds));
+  return { previous, current, targets, changes, omittedTargetCount: candidates.length - targets.length, omittedChangeCount: Math.max(0, changed.length - changes.length), removedIds: removedIds.filter(id => selectedSources.has(id)).slice(0, 12) };
+}
+
+export function impactCoverage(board: BoardDSL, state: CollaborationState, context: ImpactContext, items: ImpactItem[]): ImpactCoverage {
+  const input = buildDiscoveryContext(board, state, context);
+  const relevantIds = new Set([...context.targets.map(n => n.id), ...context.changes.map(n => n.id), ...context.targets.flatMap(n => n.sourceIds)]);
+  return { unreviewedCount: (context.omittedTargetCount ?? 0) + (context.omittedChangeCount ?? 0) + context.targets.filter(target => !items.some(item => item.nodeId === target.id)).length,
+    truncatedCount: input.nodes.filter(node => relevantIds.has(node.id) && node.truncated).length };
 }
 
 export function resolveImpactItems(context: ImpactContext, agent: ImpactItem[], jev: ImpactItem[]): ImpactItem[] {
   const changedIds = new Set(context.changes.map(change => change.id));
+  const constraintsChanged = context.previous !== undefined && context.previous.constraints !== context.current.constraints;
   return context.targets.flatMap<ImpactItem>(target => {
     const explanation = agent.find(item => item.nodeId === target.id);
     const review = jev.find(item => item.nodeId === target.id);
@@ -64,11 +79,15 @@ export function resolveImpactItems(context: ImpactContext, agent: ImpactItem[], 
     if (target.sourceIds.some(id => context.removedIds.includes(id))) {
       return [{ nodeId: target.id, status: 'verify', reason: '有一条关联资料已移除，沿用前需要核对依据。', sourceIds: [] }];
     }
-    if (!item) return [];
+    if (!item) return [{ nodeId: target.id, status: 'verify', reason: '这张卡片尚未完成影响判断，不能据此认定可以沿用。', sourceIds: target.sourceIds.filter(id => !context.removedIds.includes(id)) }];
+    const sourceIds = item.sourceIds.filter(id => sources.has(id) && id !== target.id);
     if (explanation && review && explanation.status !== review.status) {
-      return [{ nodeId: target.id, status: 'verify', reason: '两次判断有分歧，建议打开卡片核对依据。', sourceIds: item.sourceIds.filter(id => sources.has(id)) }];
+      return [{ nodeId: target.id, status: 'verify', reason: '两次判断有分歧，建议打开卡片核对依据。', sourceIds }];
     }
-    return [{ ...item, sourceIds: item.sourceIds.filter(id => sources.has(id) && id !== target.id) }];
+    if (item.status === 'revise' && !sourceIds.length && (!constraintsChanged || item.sourceIds.length)) {
+      return [{ nodeId: target.id, status: 'verify', reason: '缺少支持这项修改的依据，需核对规则是否适用于这张卡片。', sourceIds }];
+    }
+    return [{ ...item, sourceIds }];
   });
 }
 
@@ -190,16 +209,19 @@ export function mergeDiscoveries(state: CollaborationState, drafts: DiscoveryDra
   return [...refreshed, ...state.discoveries.filter(old => !refreshed.some(d => d.id === old.id))].slice(0, 40);
 }
 
-export function buildDiscoveryContext(board: BoardDSL, state: CollaborationState) {
+export function buildDiscoveryContext(board: BoardDSL, state: CollaborationState, impact?: ImpactContext) {
   const prints = nodePrints(board);
   const changedIds = board.nodes.filter(n => state.checkedNodes?.[n.id] !== prints[n.id]).map(n => n.id);
   const removedIds = Object.keys(state.checkedNodes ?? {}).filter(id => !prints[id]);
   const changed = new Set(changedIds);
   const nearby = new Set(board.edges.flatMap(e => changed.has(e.from) ? [e.to] : changed.has(e.to) ? [e.from] : []));
+  const targets = new Set(impact?.targets.map(target => target.id));
+  const priority = (id: string) => changed.has(id) ? 3 : targets.has(id) ? 2 : nearby.has(id) ? 1 : 0;
   let budget = 52000;
-  const nodes = [...board.nodes].sort((a, b) => (changed.has(b.id) ? 2 : nearby.has(b.id) ? 1 : 0) - (changed.has(a.id) ? 2 : nearby.has(a.id) ? 1 : 0))
+  let remainingPriority = board.nodes.filter(node => priority(node.id) > 0).length;
+  const nodes = [...board.nodes].sort((a, b) => priority(b.id) - priority(a.id))
     .map(node => {
-      const limit = Math.max(0, Math.min(7000, budget));
+      const limit = Math.max(0, Math.min(7000, priority(node.id) > 0 ? Math.floor(budget / Math.max(1, remainingPriority--)) : budget));
       const body = node.body.slice(0, limit); budget -= body.length + node.title.length;
       return { id: node.id, title: node.title, body, tags: node.tags, truncated: body.length < node.body.length,
         ...(node.visual?.state ? { visualState: JSON.stringify(node.visual.state).slice(0, 1500) } : {}) };
@@ -228,7 +250,9 @@ export function restoreCollaboration(raw: unknown): CollaborationState | undefin
     ...(typeof value.checkedAt === 'number' ? { checkedAt: value.checkedAt } : {}),
     ...(value.checkedNodes && typeof value.checkedNodes === 'object' ? { checkedNodes: Object.fromEntries(Object.entries(value.checkedNodes).filter(([, v]) => typeof v === 'string')) } : {}),
     ...(typeof value.checkedContext?.goal === 'string' && typeof value.checkedContext.constraints === 'string' ? { checkedContext: { goal: value.checkedContext.goal.slice(0, 500), constraints: value.checkedContext.constraints.slice(0, 5000) } } : {}),
-    ...(typeof value.impactReport?.print === 'string' ? { impactReport: { print: value.impactReport.print, items: readImpactItems(value.impactReport.items) } } : {}),
+    ...(typeof value.impactReport?.print === 'string' ? { impactReport: { print: value.impactReport.print, items: readImpactItems(value.impactReport.items),
+      referenceNodeIds: Array.isArray(value.impactReport.referenceNodeIds) ? value.impactReport.referenceNodeIds.filter(id => typeof id === 'string') : undefined,
+      coverage: value.impactReport.coverage && Number.isFinite(value.impactReport.coverage.unreviewedCount) && Number.isFinite(value.impactReport.coverage.truncatedCount) ? { unreviewedCount: Math.max(0, value.impactReport.coverage.unreviewedCount), truncatedCount: Math.max(0, value.impactReport.coverage.truncatedCount) } : undefined } } : {}),
     ...(value.budget && typeof value.budget.day === 'string' && Number.isFinite(value.budget.calls) ? { budget: { day: value.budget.day, calls: Math.max(0, value.budget.calls) } } : {}),
     ...(value.dailyLimit === null || Number.isFinite(value.dailyLimit) ? { dailyLimit: dailyLimit(value) } : {}) };
 }

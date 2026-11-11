@@ -1,5 +1,6 @@
 import { useCallback, useState } from 'react';
 import type { AgentConfig, AgentProvider } from '../types/dsl';
+import { normalizeJevConfig } from '../agent/jevConfig';
 import { loadAgentConfig, saveAgentConfig } from '../storage';
 
 export function useAgentConfig() {
@@ -54,7 +55,7 @@ export function useAgentConfig() {
   }, []);
 
   const setJev = useCallback((jev: AgentConfig['jev']) => {
-    setConfig(prev => { const next = { ...prev, jev }; saveAgentConfig(next); return next; });
+    setConfig(prev => { const next = { ...prev, jev: normalizeJevConfig(jev) }; saveAgentConfig(next); return next; });
   }, []);
 
   return { config, setProvider, setApiKey, setModel, setCliId, setBaseUrl, setMaxOutputTokens, setJev };

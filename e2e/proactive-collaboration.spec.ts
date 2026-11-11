@@ -59,7 +59,7 @@ for (const useJev of [true, false]) {
       const body: string = route.request().postDataJSON().userMessage;
       const context = JSON.parse(body.slice(body.indexOf('\n') + 1));
       expect(context.impact.context.previous.constraints).toBe('总时长 90 分钟');
-      expect(context.impact.suggestedChecks.map((item: ImpactItem) => item.nodeId)).toEqual(useJev ? ['plan'] : []);
+      expect(context.impact.suggestedChecks.map((item: ImpactItem) => item.nodeId)).toEqual([]);
       return route.fulfill(result([{ ...finding, kind: 'impact', title: '60 分钟精简草案', reason: '合并独立拍照，保留屋架观察。', prepared: '把拍照放入观察任务，另留转场时间。', nodeIds: ['plan', 'material-a'] }], [
         { nodeId: 'plan', status: 'revise', reason: '90 分钟流程超出新的上限。', sourceIds: ['material-a'] },
         { nodeId: 'roof-card', status: 'keep', reason: '观察任务可以随流程调整时长。', sourceIds: [] },
@@ -80,7 +80,7 @@ for (const useJev of [true, false]) {
     await expect(draft).toBeFocused();
     await page.reload();
     await expect(page.locator('.composer-suggestion')).toContainText('60 分钟精简草案');
-    expect(preflights).toBe(useJev ? 1 : 0);
+    expect(preflights).toBe(0);
   });
 }
 
@@ -131,7 +131,7 @@ test('changed conditions invalidate old findings and continue into a reviewed ta
   await page.getByLabel(/受众、限制与必须保留/).fill('改为 60 分钟，必须保留屋架观察。');
   await page.getByRole('button', { name: '保存目标与条件' }).click();
   await expect(page.getByRole('heading', { name: alternative.title })).toBeVisible();
-  await expect(page.getByText('Jev 暂时不可用，已保留主 Agent 的全部发现')).toBeVisible();
+  await expect(page.getByText('Jev 暂时不可用，已保留主 Agent 的全部发现')).toHaveCount(0);
   await page.getByRole('button', { name: '展开精简方案' }).click();
   await expect(page.getByText('探索建议', { exact: true })).toBeVisible();
   expect(requests.at(-1).userMessage).toContain('改为 60 分钟');
@@ -238,24 +238,15 @@ test('opening a freeform board stays quiet until a committed edit triggers sugge
   expect(calls).toBe(1);
 });
 
-test('Jev prioritizes useful findings and keeps flagged claims visible and marked when adopted', async ({ page }) => {
+test('legacy Jev settings never rank or review background discoveries', async ({ page }) => {
   await setup(page, 'research', { jev: true });
-  const unsupported = { ...finding, title: '所有居民都被迫搬走', reason: '仅根据两条说法推断全体居民去留。', prepared: '全体居民被迫搬迁，作为已确认结论。' };
-  await page.route('**/api/agent/run', route => route.fulfill(result([unsupported, finding])));
-  const answer = (value: string) => ({ type: 'choice', choice: value, probabilities: { [value]: .95 } });
-  await page.route('**/api/jev/evaluate', route => {
-    const payload = route.request().postDataJSON().request;
-    expect(payload.state.sources.some((n: any) => n.body.includes('居民说座位减少'))).toBe(true);
-    return route.fulfill({ json: { answers: { evidence_0: answer('unsupported'), evidence_1: answer('grounded'), priority: answer('candidate_0') } } });
-  });
+  const second = { ...finding, title: '另一条待核实的发现' };
+  await page.route('**/api/agent/run', route => route.fulfill(result([second, finding])));
+  let checks = 0;
+  await page.route('**/api/jev/evaluate', route => { checks++; return route.fulfill({ status: 503 }); });
   await page.goto('/');
   await openSuggestions(page);
-  await expect(page.locator('.discovery').first()).toContainText(finding.title);
-  const flagged = page.locator('.discovery').filter({ hasText: unsupported.title });
-  await expect(flagged).toContainText('部分结论可能超出资料依据');
-  await page.reload();
-  await openSuggestions(page);
-  await expect(flagged).toContainText('先核实，再采用');
-  await flagged.getByRole('button', { name: '保留为待核实' }).click();
-  await expect(page.locator('.board-node').filter({ hasText: unsupported.title })).toContainText('复查提示');
+  await expect(page.locator('.discovery').first()).toContainText(second.title);
+  await expect(page.locator('.discovery')).toHaveCount(2);
+  expect(checks).toBe(0);
 });

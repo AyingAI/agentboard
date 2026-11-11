@@ -32,6 +32,12 @@ export function validatePatchPolicy(patch: DSLPatch, policy: AgentTaskPolicy, bo
   }
 
   patch.ops.forEach((op, opIndex) => {
+    if (policy.allowedOps && !policy.allowedOps.includes(op.op)) {
+      violations.push({ opIndex, op: op.op, message: '当前任务不允许这类修改。' });
+    }
+    if ((op.op === 'update_node' || op.op === 'delete_node') && policy.referenceNodeIds?.includes(op.nodeId)) {
+      violations.push({ opIndex, op: op.op, message: `节点 ${op.nodeId} 是只读依据，不能改写。` });
+    }
     if (!policy.allowDelete && (op.op === 'delete_node' || op.op === 'delete_edge' || op.op === 'delete_group')) {
       violations.push({ opIndex, op: op.op, message: '当前权限不允许删除白板内容。' });
     }
@@ -91,5 +97,7 @@ export function describeTaskPolicy(policy: AgentTaskPolicy) {
       : 'Do not emit a layout operation with scope "all".',
   ];
 
-  return `Task scope and permissions:\n- ${scope}\n- ${permissions.join('\n- ')}`;
+  const references = policy.referenceNodeIds?.length ? `\n- Reference nodes (read only): ${policy.referenceNodeIds.join(', ')}. Preserve them exactly.` : '';
+  const operations = policy.allowedOps ? `\n- Allowed operations: ${policy.allowedOps.join(', ')}.` : '';
+  return `Task scope and permissions:\n- ${scope}\n- ${permissions.join('\n- ')}${references}${operations}`;
 }

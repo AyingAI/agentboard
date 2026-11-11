@@ -4,6 +4,8 @@ export type { AgentProgressEvent } from '../types/dsl';
 import type { AgentProgressEvent } from '../types/dsl';
 export type AgentProgressEventType = AgentProgressEvent['type'];
 
+export type LocalCliPurpose = 'discovery' | 'evidence-repair';
+
 /** Input to an agent adapter */
 export interface AgentRequest {
   boardState: BoardDSL;
@@ -12,6 +14,7 @@ export interface AgentRequest {
   taskPolicy?: AgentTaskPolicy;
   allowedOps?: PatchOpType[];
   runId?: string;
+  purpose?: 'evidence-repair';
   runContext?: AgentRunEvent[];
   /** Recent human edits to the board since the last agent call */
   recentEditEvents?: BoardEditEvent[];
@@ -27,6 +30,8 @@ export type AgentResponse = DSLPatch | InteractionRequest;
 export interface AgentError {
   code: 'NETWORK_ERROR' | 'STREAM_ERROR' | 'AUTH_ERROR' | 'RATE_LIMITED' | 'API_ERROR' | 'PARSE_ERROR' | 'TIMEOUT' | 'ABORTED';
   message: string;
+  /** Content-free host failure reason for local diagnostics. */
+  reason?: 'stale' | 'policy' | 'incomplete';
   /** Raw response text for debugging parse errors */
   rawText?: string;
   /** Whether retrying may succeed. Defaults inferred from code when omitted. */

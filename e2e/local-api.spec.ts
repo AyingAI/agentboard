@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-test('local APIs reject foreign origins, rebound hosts and cross-site requests', async ({ request }) => {
+test('local APIs reject foreign origins, rebound hosts and cross-site requests', async ({ request, baseURL }) => {
   const origin = { Origin: 'https://untrusted.example' };
   for (const path of ['/api/clis', '/api/agent/run/test-run', '/api/jev/evaluate']) {
     expect((await request.get(path, { headers: origin })).status()).toBe(403);
@@ -10,7 +10,13 @@ test('local APIs reject foreign origins, rebound hosts and cross-site requests',
   expect((await request.get('/api/clis', { headers: { Host: 'untrusted.example:5173' } })).status()).toBe(403);
   expect((await request.get('/api/clis', { headers: { 'Sec-Fetch-Site': 'cross-site' } })).status()).toBe(403);
 
-  const local = await request.get('/api/agent/run/test-run', { headers: { Origin: 'http://localhost:5173' } });
+  expect(baseURL).toBeDefined();
+  const localURL = new URL(baseURL!);
+  const differentPort = new URL(localURL);
+  differentPort.port = localURL.port === '1' ? '2' : '1';
+  expect((await request.get('/api/clis', { headers: { Origin: differentPort.origin } })).status()).toBe(403);
+
+  const local = await request.get('/api/agent/run/test-run', { headers: { Origin: localURL.origin } });
   expect(local.status()).toBe(404);
   expect(await local.json()).toEqual({ error: 'Run not found' });
 });

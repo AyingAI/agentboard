@@ -241,3 +241,28 @@ test('existing visuals remain interactive while another request is working', asy
     await expect(frame.locator('#value')).toHaveText('10');
   } finally { await agent.close(); }
 });
+
+
+test('a lost local run retries the same task without asking for a smaller scope', async ({ page }) => {
+  let calls = 0;
+  await page.route('**/api/agent/run', route => {
+    calls++;
+    const event = calls === 1 ? { type: 'progress', event: { type: 'connected', message: '已连接' } }
+      : { type: 'result', text: JSON.stringify({ type: 'dsl_patch', summary: '已恢复原任务', ops: [{ op: 'add_node', node: firstCard }] }) };
+    return route.fulfill({ contentType: 'application/x-ndjson', body: JSON.stringify(event) + '\n' });
+  });
+  await page.route('**/api/agent/run/*', route => route.fulfill({ status: 404 }));
+  await start(page);
+  await page.locator('.prompt-bar textarea').fill('比较三种产品方向，做成可以探索的画布');
+  await page.locator('.prompt-bar textarea').press('Enter');
+  const recovery = page.getByRole('status', { name: '生成恢复' });
+  await expect(recovery).toContainText('原请求已保留');
+  await expect(page.locator('.interaction-toast')).toHaveCount(0);
+  expect(calls).toBe(1);
+  await recovery.getByRole('button', { name: '重新尝试' }).click();
+  await expect(page.locator('[data-node-id="first-card"]')).toContainText(firstCard.title);
+  expect(calls).toBe(2);
+  const session = await page.evaluate(() => JSON.parse(localStorage.getItem('agentboard.sessions')!).sessions[0]);
+  expect(Object.keys(session.runs)).toHaveLength(1);
+  expect(session.activities.filter((item: any) => item.kind === 'user_message')).toHaveLength(1);
+});

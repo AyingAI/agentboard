@@ -265,6 +265,7 @@ export interface AgentProgressEvent {
   outputChars?: number;
   previewTitles?: string[];
   toolName?: string;
+  retryAttempt?: number;
 }
 
 export interface LiveRunProgress {
@@ -366,6 +367,8 @@ export interface LocalCliInfo {
   installations?: LocalCliInstallation[];
 }
 
+export interface EvidenceIssue { nodeId: string; sourceTitle: string; text: string }
+
 export interface AgentConfig {
   provider: AgentProvider;
   apiKey?: string;
@@ -377,7 +380,7 @@ export interface AgentConfig {
   /** API response budget. Models and compatible endpoints have different limits. */
   maxOutputTokens?: number;
   /** Optional evaluator; never required by the main Agent. */
-  jev?: { enabled: boolean; apiKey: string; model?: string };
+  jev?: { enabled: boolean; apiKey: string; model?: string; evidenceReview?: boolean };
 }
 
 // Proactive collaboration is separate from board patches: discovering is not editing.
@@ -409,9 +412,12 @@ export interface ImpactContext {
   current: { goal: string; constraints: string };
   changes: { id: string; title: string; body: string; kind: 'added' | 'edited'; truncated: boolean }[];
   removedIds: string[];
+  omittedTargetCount?: number;
+  omittedChangeCount?: number;
   targets: { id: string; title: string; body: string; truncated: boolean; sourceIds: string[] }[];
 }
-export interface ImpactReport { print: string; items: ImpactItem[] }
+export interface ImpactCoverage { unreviewedCount: number; truncatedCount: number }
+export interface ImpactReport { print: string; items: ImpactItem[]; referenceNodeIds?: string[]; coverage?: ImpactCoverage }
 export interface Discovery extends DiscoveryDraft {
   id: string;
   createdAt: number;
@@ -452,6 +458,9 @@ export interface CollaborationState {
 export interface AgentTaskPolicy {
   scope: 'board' | 'selection';
   selectedNodeIds: string[];
+  /** Read-only material supporting this task; also checked when accepting a proposal. */
+  referenceNodeIds?: string[];
+  allowedOps?: PatchOpType[];
   allowExistingEdits: boolean;
   allowDelete: boolean;
   allowFullBoardLayout: boolean;
@@ -480,6 +489,10 @@ export interface RunState {
     activityId: string;
     patch: DSLPatch;
     baseBoard: BoardDSL;
+    evidenceSourceId?: string;
+    evidenceNote?: string;
+    evidenceIssues?: EvidenceIssue[];
+    projectContext?: string;
   };
 }
 

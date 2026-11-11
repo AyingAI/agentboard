@@ -3,7 +3,7 @@ import type { AgentError, AgentProgressEvent } from './types';
 export type AgentStreamEvent =
   | { type: 'progress'; event: AgentProgressEvent }
   | { type: 'result'; text: string }
-  | { type: 'error'; message: string };
+  | { type: 'error'; message: string; code?: AgentError['code']; retryable?: boolean };
 
 export function parseAgentStreamLine(line: string): AgentStreamEvent | null {
   const trimmed = line.trim();
@@ -44,8 +44,9 @@ export async function consumeAgentStream(
     if (event.type === 'result') resultText = event.text;
     if (event.type === 'error') {
       throw {
-        code: 'API_ERROR',
+        code: event.code ?? 'API_ERROR',
         message: event.message,
+        retryable: event.retryable,
       } satisfies AgentError;
     }
   };

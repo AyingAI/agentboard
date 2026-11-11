@@ -8,6 +8,7 @@ import { findAgentResponseJson } from './src/agent/response';
 import { readCliEvent, type CliOutputState } from './src/server/cliEvents';
 import { draftTitles } from './src/agent/liveProgress';
 import type { AgentProgressEvent } from './src/types/dsl';
+import type { AgentError, LocalCliPurpose } from './src/agent/types';
 import { discoveryCliArgs, findDiscoveryJson } from './src/server/discoveryCli';
 import { isLocalRequest, LocalRequestError, readLocalJson, sendLocalJson } from './src/server/localApi';
 
@@ -22,6 +23,7 @@ type StoredRun = {
   status: 'running' | 'completed' | 'failed' | 'cancelled';
   text?: string;
   error?: string;
+  failure?: AgentError;
   child?: ChildProcessWithoutNullStreams;
   updatedAt: number;
 };
@@ -37,7 +39,7 @@ function writeStreamEvent(
   event:
     | { type: 'progress'; event: AgentProgressEvent }
     | { type: 'result'; text: string }
-    | { type: 'error'; message: string },
+    | { type: 'error'; message: string; code?: AgentError['code']; retryable?: boolean },
 ) {
   if (!res.writableEnded && !res.destroyed) {
     res.write(`${JSON.stringify(event)}\n`);
@@ -88,15 +90,15 @@ function runCLIStream(
   userMessage: string,
   res: ServerResponse,
   run: StoredRun,
-  purpose?: 'discovery',
+  purpose?: LocalCliPurpose,
 ): Promise<string> {
   const fullPrompt = `${systemPrompt}\n\n---\n\n${userMessage}`;
   const spec = getCliSpec(cli.id);
   if (!spec || !cli.path) return Promise.reject(new Error(`CLI "${cli.name}" is not available`));
   const usesEvents = ['claude', 'pi', 'codex'].includes(spec.id);
-  const backgroundArgs = purpose === 'discovery' ? discoveryCliArgs(cli.id) : null;
-  if (purpose === 'discovery' && !backgroundArgs) return Promise.reject(new Error('此 CLI 暂不支持后台分析，请选用 Codex、Claude Code、Pi 或 API；手动讨论仍可正常使用。'));
-  const args = backgroundArgs ?? (spec.promptMode === 'argument' ? [...spec.args, fullPrompt] : spec.args);
+  const restrictedArgs = purpose ? discoveryCliArgs(cli.id) : null;
+  if (purpose && !restrictedArgs) return Promise.reject(new Error('此 CLI 暂不支持后台分析，请选用 Codex、Claude Code、Pi 或 API；手动讨论仍可正常使用。'));
+  const args = restrictedArgs ?? (spec.promptMode === 'argument' ? [...spec.args, fullPrompt] : spec.args);
   const findResponse = purpose === 'discovery' ? findDiscoveryJson : findAgentResponseJson;
 
   return new Promise((resolve, reject) => {
@@ -159,6 +161,7 @@ function runCLIStream(
     }, CLI_TIMEOUT_MS);
 
     const finishIfCompleteResponse = () => {
+      if (state.failure) return false;
       const text = state.resultText || state.partialText || state.assistantText;
       const responseJson = findResponse(text);
       if (!responseJson) return false;
@@ -224,9 +227,17 @@ function runCLIStream(
     child.on('error', (error) => finish(() => reject(error)));
     child.on('close', (code, signal) => {
       if (stdoutBuffer.trim() && usesEvents) consumeLine(stdoutBuffer);
+      if (state.failure) {
+        finish(() => reject(Object.assign(new Error(state.failure!.message), state.failure)));
+        return;
+      }
       const text = state.resultText || state.partialText || state.assistantText;
       if (code === 0 && text.trim()) {
         finish(() => resolve(text.trim()));
+        return;
+      }
+      if (code === 0) {
+        finish(() => reject(Object.assign(new Error('Agent 已结束但没有返回可交付内容，原始请求已保留。'), { code: 'PARSE_ERROR', retryable: false })));
         return;
       }
       const detail = stderr.trim() || `CLI exited with code ${code ?? 'unknown'}${signal ? ` (${signal})` : ''}`;
@@ -306,7 +317,7 @@ async function handleRun(req: IncomingMessage, res: ServerResponse, registry: Cl
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.flushHeaders();
 
-    const text = await runCLIStream(requestId, cli, systemPrompt, userMessage, res, run, parsed.purpose === 'discovery' ? 'discovery' : undefined);
+    const text = await runCLIStream(requestId, cli, systemPrompt, userMessage, res, run, parsed.purpose === 'discovery' || parsed.purpose === 'evidence-repair' ? parsed.purpose : undefined);
     if (run.status === 'cancelled') { res.end(); return; }
     run.status = 'completed';
     run.text = text;
@@ -321,12 +332,14 @@ async function handleRun(req: IncomingMessage, res: ServerResponse, registry: Cl
     if (run && run.status === 'running') {
       run.status = 'failed';
       run.error = message;
+      const failure = err as AgentError;
+      if (['AUTH_ERROR', 'RATE_LIMITED', 'TIMEOUT', 'NETWORK_ERROR', 'API_ERROR', 'ABORTED', 'PARSE_ERROR'].includes(failure.code)) run.failure = { code: failure.code, message, retryable: failure.retryable };
       run.child = undefined;
       run.updatedAt = Date.now();
       scheduleRunCleanup(requestId);
     }
     if (res.headersSent) {
-      writeStreamEvent(res, { type: 'error', message });
+      writeStreamEvent(res, { type: 'error', message, code: run?.failure?.code, retryable: run?.failure?.retryable });
       res.end();
     } else {
       sendLocalJson(res, err instanceof LocalRequestError ? err.status : 500,
@@ -346,6 +359,8 @@ function handleRunStatus(requestId: string, res: ServerResponse) {
     status: run.status,
     text: run.status === 'completed' ? run.text : undefined,
     error: run.status === 'failed' || run.status === 'cancelled' ? run.error : undefined,
+    code: run.failure?.code,
+    retryable: run.failure?.retryable,
   });
 }
 

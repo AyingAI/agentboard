@@ -83,3 +83,15 @@ describe('task policy', () => {
     ]), defaultTaskPolicy(['n1']), board)).toHaveLength(1);
   });
 });
+
+it('keeps impact references read-only and restricts a revision to existing-card updates', () => {
+  const policy = { ...defaultTaskPolicy(['target']), referenceNodeIds: ['rule'], allowedOps: ['update_node' as const] };
+  const result = validatePatchPolicy(patch([
+    { op: 'update_node', nodeId: 'target', changes: { body: '按新规则修订。' } },
+    { op: 'update_node', nodeId: 'rule', changes: { body: '覆盖用户规则。' } },
+    { op: 'add_node', node: { id: 'extra', title: '额外副本', body: '', type: 'card', x: 0, y: 0, width: 200, height: 100 } },
+  ]), policy);
+  expect(result.some(item => item.opIndex === 0)).toBe(false);
+  expect(result.some(item => item.opIndex === 1 && item.message.includes('只读依据'))).toBe(true);
+  expect(result.some(item => item.opIndex === 2)).toBe(true);
+});

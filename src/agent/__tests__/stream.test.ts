@@ -51,6 +51,11 @@ describe('agent stream', () => {
     });
   });
 
+  it('preserves typed provider failures and avoids adding another retry loop', async () => {
+    const response = streamResponse(['{"type":"error","code":"RATE_LIMITED","retryable":false,"message":"服务暂时限流"}\n']);
+    await expect(consumeAgentStream(response)).rejects.toMatchObject({ code: 'RATE_LIMITED', retryable: false, message: '服务暂时限流' });
+  });
+
   it('rejects a stream without a final result', async () => {
     const response = streamResponse([
       '{"type":"progress","event":{"type":"heartbeat","message":"still running"}}\n',

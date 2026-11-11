@@ -8,7 +8,13 @@ AgentBoard is a local-first visual collaboration canvas. Describe a question or 
 
 ![AgentBoard cover](./assets/agentboard-cover.png)
 
-## v0.4.0 · Suggestions prepared by the agent
+## v0.5.0 · Check sources before delivery
+
+Configure TypeSafe in Agent settings under “交付前核对依据”. For edits to existing research cards with one identifiable source, JEV checks factual sentences against that source. The main agent can revise the flagged sentences once. Review, apply, and undo use the existing proposal. Checking, repair, and rechecking share a 15-second budget. If the service fails, the draft remains available and any located unresolved issues appear beside the relevant cards.
+
+Source checking is off by default. Enabling it sends relevant source text and draft sentences to TypeSafe. The key stays in browser storage. Existing source-checking choices are preserved. Legacy JEV background settings migrate connection details only. Static deployments require TypeSafe CORS support. The main agent and local retrieval assess changes across cards in the background. Untagged execution cards can enter the review, with coverage gaps shown for omitted cards and unread text.
+
+## Suggestions prepared by the agent
 
 Start with topic research or themed experience planning, enter a goal and add a source. Once an agent is connected, new material, committed content edits and changed constraints trigger a background analysis without requiring a chat prompt.
 
@@ -22,8 +28,6 @@ Start with topic research or themed experience planning, enter a goal and add a 
 - **Controlled activity.** Automatic analysis runs on committed changes to the visible board and uses the connected model's quota. Each board defaults to 12 automatic attempts per day. Adjust or remove the cap under the board's goals and constraints, or pause automatic analysis. Manual analysis and chat remain available.
 
 Research focuses on how material supports or limits an angle. Experience planning connects audience, theme, participant activities and changed constraints. Examples, source collection, return markers and editable Markdown drafts remain available without an agent.
-
-**Optional Jev review.** In Agent settings, open the connection details in “Jev 复查”, enter a TypeSafe API key, and turn on the switch. Jev checks potentially affected outcomes before the primary agent prepares a revision and reviews the resulting discoveries. The primary agent handles the check when Jev is unavailable. Enabled evaluation sends the goal, constraints, and relevant content to TypeSafe. Keys persist in browser storage. Static deployments require TypeSafe CORS support. [Native System One API](https://docs.typesafe.ai/api/system-one)
 
 Background CLI analysis supports Codex, Claude Code and Pi with narrower execution profiles. Other CLIs remain available for explicit tasks. Claude and OpenAI-compatible APIs also support discovery. Freeform boards are analyzed after a committed edit. Example boards can opt in through the board analysis settings. This version does not monitor closed pages or automatically retrieve external sources.
 
@@ -249,4 +253,4 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for contributions and [SECURITY.md](./S
 
 ## License
 
-[MIT](./LICENSE)
+AgentBoard is released under the [MIT License](./LICENSE). Third-party dependencies retain their respective licenses.

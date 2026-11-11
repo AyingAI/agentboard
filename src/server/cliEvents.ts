@@ -1,4 +1,5 @@
 import type { AgentProgressEvent } from '../types/dsl';
+import type { AgentError } from '../agent/types';
 
 export interface CliOutputState {
   outputChars: number;
@@ -8,6 +9,20 @@ export interface CliOutputState {
   lastTool?: string;
   lastOutputSentAt: number;
   seenTools: Set<string>;
+  failure?: AgentError;
+}
+
+/** Provider errors can contain headers or prompts; expose only fixed messages. */
+export function cliFailure(raw: unknown, aborted = false): AgentError {
+  const message = typeof raw === 'string' ? raw : '';
+  if (aborted) return { code: 'ABORTED', message: '本地 Agent 已中止生成。', retryable: false };
+  if (/^429\b/.test(message)) return { code: 'RATE_LIMITED', message: 'Agent 服务暂时限流，请稍后重试。', retryable: false };
+  if (/401|403|unauthori|authentic|api.?key|credential/i.test(message)) return { code: 'AUTH_ERROR', message: 'Agent 认证失败，请检查所选连接。', retryable: false };
+  if (/429|rate.?limit/i.test(message)) return { code: 'RATE_LIMITED', message: 'Agent 服务暂时限流，请稍后重试。', retryable: false };
+  if (/timeout|timed.?out|deadline/i.test(message)) return { code: 'TIMEOUT', message: 'Agent 服务响应超时，原始请求已保留。', retryable: false };
+  if (/network|fetch failed|ECONN|connection/i.test(message)) return { code: 'NETWORK_ERROR', message: 'Agent 服务连接失败，原始请求已保留。', retryable: false };
+  if (/tool|schema|parameter|unsupported|not supported/i.test(message)) return { code: 'API_ERROR', message: 'Agent 服务不接受当前请求配置，请检查模型和工具设置。', retryable: false };
+  return { code: 'API_ERROR', message: 'Agent 服务未能返回结果，原始请求已保留，请检查连接后重试。', retryable: false };
 }
 
 export function toolLabel(name: string) {
@@ -41,19 +56,22 @@ export function readCliEvent(provider: string, line: string, state: CliOutputSta
   }
   if (provider === 'pi') {
     if (value.type === 'agent_start') progress.push({ type: 'working', message: 'Agent 已开始处理你的需求' });
-    if (value.type === 'message_start' && value.message?.role === 'assistant') { state.partialText = ''; state.assistantText = ''; state.resultText = ''; }
+    if (value.type === 'message_start' && value.message?.role === 'assistant') { state.partialText = ''; state.assistantText = ''; state.resultText = ''; state.failure = undefined; }
     if (value.type === 'message_update') {
       const event = value.assistantMessageEvent;
       if (event?.type === 'text_delta' && typeof event.delta === 'string') { state.partialText += event.delta; state.outputChars += event.delta.length; }
       if (event?.type === 'thinking_start') progress.push({ type: 'working', message: '正在分析你的需求' });
     }
     if (value.type === 'tool_execution_start' && typeof value.toolName === 'string') tool(value.toolName, value.toolCallId);
-    if (value.type === 'message_end' && value.message?.role === 'assistant') state.assistantText = textContent(value.message);
+    if (value.type === 'message_end' && value.message?.role === 'assistant') {
+      state.assistantText = textContent(value.message);
+      if (value.message.stopReason === 'error' || value.message.stopReason === 'aborted') state.failure = cliFailure(value.message.errorMessage, value.message.stopReason === 'aborted');
+    }
     if (value.type === 'agent_end' && Array.isArray(value.messages)) {
       const text = [...value.messages].reverse().map(textContent).find(Boolean);
       if (text) state.resultText = text;
     }
-    if (value.type === 'auto_retry_start') progress.push({ type: 'working', message: `服务暂时繁忙，正在进行第 ${Number(value.attempt) || 1} 次重试` });
+    if (value.type === 'auto_retry_start') progress.push({ type: 'working', message: `服务暂时繁忙，正在进行第 ${Number(value.attempt) || 1} 次重试`, retryAttempt: Number(value.attempt) || 1 });
     if (value.type === 'compaction_start') progress.push({ type: 'working', message: '正在整理上下文，保留讨论中的关键信息' });
   }
   if (provider === 'claude') {
@@ -68,9 +86,11 @@ export function readCliEvent(provider: string, line: string, state: CliOutputSta
       for (const block of value.message?.content || []) if (block.type === 'tool_use') tool(block.name, block.id);
       const text = textContent(value.message); if (text) state.assistantText = text;
     }
-    if (value.type === 'result' && typeof value.result === 'string') state.resultText = value.result;
+    if (value.type === 'result' && value.is_error) state.failure = cliFailure(value.result);
+    else if (value.type === 'result' && typeof value.result === 'string') state.resultText = value.result;
   }
   if (provider === 'codex') {
+    if (value.type === 'turn.failed') state.failure = cliFailure(value.error?.message);
     if (value.type === 'turn.started') progress.push({ type: 'working', message: 'Codex 已开始处理你的需求' });
     const item = value.item;
     if (item && value.type === 'item.started') {

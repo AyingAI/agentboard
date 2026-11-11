@@ -42,19 +42,19 @@ export default function JevSettings({ value, onChange }: Props) {
         <span className="jev-settings-icon" aria-hidden="true">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3.5 19 6v5.3c0 4.1-2.7 7-7 9.2-4.3-2.2-7-5.1-7-9.2V6l7-2.5Z"/><path d="m9 11.8 2 2 4-4"/></svg>
         </span>
-        <h3 id="jev-settings-title">Jev 复查</h3>
+        <h3 id="jev-settings-title">交付前核对依据</h3>
         <span className="jev-optional">选配</span>
-        <button className="jev-switch" type="button" role="switch" aria-checked={jev.enabled} aria-label="启用 Jev 复查" onClick={() => {
-          onChange({ ...jev, enabled: !jev.enabled });
-          if (!jev.enabled && !configured) setExpanded(true);
+        <button className="jev-switch" type="button" role="switch" aria-checked={jev.evidenceReview === true} aria-label="启用交付前核对依据" aria-describedby="jev-evidence-note" onClick={() => {
+          onChange({ ...jev, enabled: jev.evidenceReview !== true, evidenceReview: jev.evidenceReview !== true });
+          if (!jev.evidenceReview && !configured) setExpanded(true);
         }}><span /></button>
       </div>
-      <p>资料或条件变了，帮你找出哪些成果需要重看。</p>
+      <p id="jev-evidence-note">根据明确原文改写研究卡片时，核对草案中的事实，发现问题后尝试修订一次。开启后会将相关原文和草案句子发送给 TypeSafe，在原预览中确认修改。</p>
     </div>
     <details className="jev-connection" open={expanded} onToggle={event => setExpanded(event.currentTarget.open)}>
       <summary>
         <span>{configured ? '连接设置' : '配置连接'}</span>
-        <small className={configured && jev.enabled ? 'is-enabled' : ''}><i aria-hidden="true" />{configured ? (jev.enabled ? '已启用' : '已关闭') : '待配置'}</small>
+        <small className={configured && jev.evidenceReview ? 'is-enabled' : ''}><i aria-hidden="true" />{configured ? (jev.evidenceReview ? '已启用' : '已关闭') : '待配置'}</small>
         <svg viewBox="0 0 16 16" width="14" height="14" fill="none" aria-hidden="true"><path d="m4.5 6 3.5 3.5L11.5 6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
       </summary>
       <div className="jev-connection-body">
@@ -66,7 +66,7 @@ export default function JevSettings({ value, onChange }: Props) {
           <button type="button" className="config-inline-button" disabled={!configured || result?.state === 'working'} onClick={checkConnection}>{result?.state === 'working' ? '测试中…' : '测试连接'}</button>
           <span className={result?.state} role="status">{result?.text}</span>
         </div>
-        <p className="jev-connection-note">启用后会把当前目标、条件和本次复查涉及的内容发送给 TypeSafe。密钥保存在此浏览器。</p>
+        <p className="jev-connection-note">供应商：TypeSafe。密钥保存在此浏览器。启用后会把相关原文和草案句子发送给 TypeSafe；修订在原修改预览中确认。</p>
       </div>
     </details>
   </section>;

@@ -98,8 +98,10 @@ test('Jev switch is separate from connection details and preserves the saved con
   await page.route('**/api/jev/evaluate', route => route.fulfill({ json: { model: 'jev-latest', answers: { connected: { type: 'noul', noul: .99 } } } }));
   await page.goto('/');
   await page.getByRole('button', { name: 'Agent 设置', exact: true }).click();
-  const card = page.getByRole('region', { name: 'Jev 复查' });
-  const toggle = card.getByRole('switch', { name: '启用 Jev 复查' });
+  const card = page.getByRole('region', { name: '交付前核对依据', exact: true });
+  const toggle = card.getByRole('switch', { name: '启用交付前核对依据' });
+  await expect(toggle).toHaveAttribute('aria-checked', 'false');
+  await toggle.click();
   await expect(toggle).toHaveAttribute('aria-checked', 'true');
   await expect(card.getByLabel('Jev API 密钥')).toBeHidden();
   await toggle.focus();
@@ -109,6 +111,8 @@ test('Jev switch is separate from connection details and preserves the saved con
   await card.getByText('连接设置', { exact: true }).click();
   await expect(card.getByLabel('Jev API 密钥')).toHaveValue('test-key-not-a-credential');
   await expect(card.getByLabel('Jev API 密钥')).toHaveAttribute('type', 'password');
+  await expect(card.getByRole('checkbox')).toHaveCount(0);
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('agentboard.config')!).jev.evidenceReview)).toBe(false);
   await toggle.click();
   await card.getByRole('button', { name: '测试连接' }).click();
   await expect(card.getByRole('status')).toHaveText('连接成功 · jev-latest');

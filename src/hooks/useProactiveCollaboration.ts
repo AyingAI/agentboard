@@ -1,9 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { AgentConfig, BoardDSL, CollaborationState, DiscoveryReview, ImpactItem } from '../types/dsl';
-import { buildImpactContext, collaborationEnabled, consumeBudget, dailyLimit, hasBudget, impactProjectContext, mergeDiscoveries, nodePrints, resolveImpactItems, semanticPrint } from '../agent/discoveries';
+import type { AgentConfig, BoardDSL, CollaborationState } from '../types/dsl';
+import { buildImpactContext, collaborationEnabled, consumeBudget, dailyLimit, hasBudget, impactCoverage, impactProjectContext, mergeDiscoveries, nodePrints, resolveImpactItems, semanticPrint } from '../agent/discoveries';
 import { discover } from '../agent/discoveryAgent';
-import { evaluateDiscoveries, evaluateImpact } from '../agent/jev';
-import { withTimeout } from '../agent/resilience';
 import { readExploration } from '../data/exploration';
 
 type Options = {
@@ -21,7 +19,6 @@ export function useProactiveCollaboration(options: Options) {
   const manualRequest = useRef<{ sessionId: string; print: string } | null>(null);
   const [status, setStatus] = useState<'idle' | 'working' | 'error'>('idle');
   const [message, setMessage] = useState('');
-  const [jevMessage, setJevMessage] = useState('');
   const [retry, setRetry] = useState(0);
   const [visible, setVisible] = useState(document.visibilityState !== 'hidden');
   const { sessionId, board, state, configured, busy, config, update } = options;
@@ -39,7 +36,7 @@ export function useProactiveCollaboration(options: Options) {
     const scope = `${sessionId}:${print}`;
     if (feedbackScope.current !== scope) {
       feedbackScope.current = scope;
-      setStatus('idle'); setMessage(''); setJevMessage('');
+      setStatus('idle'); setMessage('');
     } else {
       setStatus(current => current === 'working' ? 'idle' : current);
     }
@@ -60,44 +57,24 @@ export function useProactiveCollaboration(options: Options) {
     const timer = setTimeout(async () => {
       if (abort.signal.aborted) return;
       attempted.current = attempt;
-      setStatus('working'); setMessage('正在联系已有线索，准备一个可继续的发现…'); setJevMessage('');
+      setStatus('working'); setMessage('正在联系已有线索，准备一个可继续的发现…');
       if (!manual) update(sessionId, consumeBudget);
       try {
         const impact = buildImpactContext(board, state);
-        const jev = config.jev?.enabled && config.jev.apiKey ? config.jev : undefined;
-        let suggestedChecks: ImpactItem[] = [];
-        if (impact) {
-          setMessage('正在查看这次变化影响了哪些成果…');
-          if (jev) {
-            const preflight = withTimeout(abort.signal, 2200);
-            try {
-              suggestedChecks = await evaluateImpact(jev, impact, preflight.signal);
-            } catch { /* The main Agent can assess the change without Jev. */ }
-            finally { preflight.cleanup(); }
-          }
-        }
+        if (impact) setMessage('正在查看这次变化影响了哪些成果…');
         if (abort.signal.aborted) return;
         const response = await discover(config, board, state, abort.signal, event => {
           if (!abort.signal.aborted && event.type === 'output') setMessage('正在整理发现与依据…');
-        }, impact ? { context: impact, suggestedChecks } : undefined);
-        let drafts = response.discoveries;
-        let reviews: Record<string, DiscoveryReview> | undefined;
-        if (jev && drafts.length) {
-          try {
-            const evaluated = await evaluateDiscoveries(jev, board, state, drafts, abort.signal);
-            drafts = evaluated.drafts; reviews = evaluated.reviews;
-            if (!abort.signal.aborted) setJevMessage(evaluated.flagged ? `Jev 提示 ${evaluated.flagged} 条候选需要复查${evaluated.flagged < drafts.length ? '，已优先展示其他发现' : '，可以先查看依据'}` : 'Jev 已复查这些候选发现');
-          } catch {
-            if (!abort.signal.aborted) setJevMessage('Jev 暂时不可用，已保留主 Agent 的全部发现');
-          }
-        }
+        }, impact ? { context: impact, suggestedChecks: [] } : undefined, { taskId: `background_${sessionId}`, attemptId: `background_${Date.now()}` });
+        const drafts = response.discoveries;
         const now = latest.current;
         if (abort.signal.aborted || now.sessionId !== sessionId || semanticPrint(now.board, now.state) !== print) return;
-        const items = impact ? resolveImpactItems(impact, response.impacts ?? [], suggestedChecks) : [];
+        const items = impact ? resolveImpactItems(impact, response.impacts ?? [], []) : [];
+        const coverage = impact ? impactCoverage(board, state, impact, response.impacts ?? []) : undefined;
         update(sessionId, current => ({ ...current, understanding: response.understanding, checkedPrint: print, checkedAt: Date.now(),
           checkedNodes: nodePrints(board), checkedContext: impactProjectContext(board, current),
-          impactReport: impact ? (items.length ? { print, items } : undefined) : current.impactReport,
-          discoveries: mergeDiscoveries(current, drafts, board, reviews) }));
+          impactReport: impact ? (items.length || coverage?.unreviewedCount || coverage?.truncatedCount ? { print, items, coverage, referenceNodeIds: impact.changes.map(node => node.id) } : undefined) : current.impactReport,
+          discoveries: mergeDiscoveries(current, drafts, board) }));
         setMessage(drafts.length ? '发现已准备好，可以随时查看' : items.some(item => item.status !== 'keep') ? '已整理受影响的成果' : '已看过这次变化，暂时没有值得补充的发现');
         setStatus('idle');
       } catch (error) {
@@ -147,5 +124,5 @@ export function useProactiveCollaboration(options: Options) {
     update(sessionId, current => ({ ...current, checkedPrint: semanticPrint(next, current), checkedNodes: nodePrints(next), checkedContext: impactProjectContext(next, current) }));
   }, []);
 
-  return { status, message, jevMessage, enabled, print, pause, refresh, resume, acknowledge };
+  return { status, message, enabled, print, pause, refresh, resume, acknowledge };
 }

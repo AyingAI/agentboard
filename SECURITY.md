@@ -1,6 +1,6 @@
 # Security Policy
 
-AgentBoard is currently a local-first prototype.
+AgentBoard runs locally and uses the model connections you configure.
 
 ## Secrets
 
@@ -8,7 +8,7 @@ Do not commit API keys, local credentials, `.env` files, exported browser storag
 
 API keys entered in the UI are stored in browser `localStorage`. Treat the browser profile and local machine as trusted local state.
 
-API mode sends the prompt and relevant board context to the configured model endpoint. Optional Jev review sends the goal, constraints and relevant material to TypeSafe. Use trusted endpoints and review the information you put on a board. Exports contain card content and visual state.
+API mode sends the prompt and relevant board context to the configured model endpoint. Source checking before delivery is off by default. When enabled for an eligible edit, it sends the selected source text and draft factual sentences to TypeSafe. The connection test uses a fixed example. Exports contain card content and visual state.
 
 ## Local CLI Bridge
 

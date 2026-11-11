@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.5.0 — 2026-11-11
+
+- Release source checking before delivery as an opt-in feature for research edits based on one identifiable source. Remove broad JEV impact screening and discovery ranking from background analysis. Preserve saved connections and explicit source-checking consent through one switch.
+- Bound checking, one sentence-level repair and recheck to 15 seconds. Preserve partial judgments and all located unresolved issues, keep drafts available after optional failures, and retain one preview/apply/undo transaction. Reject late results and changed source relationships or project boundaries.
+- Read untagged execution cards as impact candidates, prioritize direct dependencies, reserve context for target text and show omitted or unread coverage. Keep source rules and independent projects protected during scoped revisions.
+- Preserve existing cards edited in the same batch when proposing impact revisions. Give saved source references precedence over conflicting targets in older reports.
+- Keep newly assessed cards out of sync write scope when their proposed revision has no applicable source or explicitly changed board condition.
+- Protect explicitly cited research sources before generation, preserve authorized source edits, and reject stale proposals after project goals or constraints change. Offer retry through the existing entry and preserve task identity and accumulated waiting across attempts. Recover a lost local run through the same entry without asking the user to redefine its scope.
+- Keep bounded local stage measurements without source text or keys. Distinguish provider retries from host calls and exclude synthetic verification tasks from usage measurements. Application remains a completion proxy.
+- Preserve typed Pi provider errors even when JSON mode exits with code zero. Carry errors through streaming and recovery polling, classify native timeouts and cancellations, and avoid adding host retries after the provider has exhausted its own attempts.
+- Require source checking to be enabled with the same connection when a request is submitted and when checking begins. Record changed settings, unknown eligibility after an early failure, and total optional review wait in local measurements.
+- Keep the original preview when a material card only contains an external link or a factual sentence exceeds the source-checking length limit.
+- Ask the primary Agent to check calculated dates and totals against their source rules and verify that plan alternatives fit their stated duration.
+
+
 ## 0.4.0 — 2026-11-10
 
 - Start with guided topic research or activity and travel planning, or create a freeform board. Collect sources, return to a marked card, and edit or copy a Markdown outline. First-time CLI setup prefers installed Pi and respects saved choices.

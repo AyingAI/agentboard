@@ -4,6 +4,11 @@ dist/
 .DS_Store
 .env
 .env.*
+.npmrc
+*.pem
+*.key
+*.p12
+*.pfx
 docs/
 diagrams/
 
@@ -11,6 +16,7 @@ diagrams/
 .agentboard/
 agentboard.sessions*.json
 agentboard.*.json
+*.agentboard.json
 *.session.json
 *.sessions.json
 *.history.json

@@ -1,20 +1,25 @@
 import { IMPACT_STATUSES, type AgentConfig, type BoardDSL, type CollaborationState, type DiscoveryDraft, type DiscoveryEvaluation, type DiscoveryReview, type ImpactContext, type ImpactItem } from '../types/dsl';
 import { buildDiscoveryContext, discoveryKey } from './discoveries';
-import { withTimeout } from './resilience';
+import { mapAbortError, untilAborted, withTimeout } from './resilience';
 
 export async function requestJev(config: NonNullable<AgentConfig['jev']>, state: unknown, questions: Record<string, unknown>, externalSignal?: AbortSignal) {
   const { signal, cleanup } = withTimeout(externalSignal, 8000);
   try {
     const body = { model: config.model?.trim() || 'jev-latest', state, questions };
     const local = import.meta.env.DEV;
-    const response = await fetch(local ? '/api/jev/evaluate' : 'https://api.typesafe.ai/v1/systemone', {
+    const response = await untilAborted(() => fetch(local ? '/api/jev/evaluate' : 'https://api.typesafe.ai/v1/systemone', {
       method: 'POST', signal, headers: { 'Content-Type': 'application/json', ...(local ? {} : { Authorization: `Bearer ${config.apiKey}` }) },
       body: JSON.stringify(local ? { apiKey: config.apiKey, request: body } : body),
-    });
-    if (!response.ok) throw new Error(`Jev 暂时不可用（${response.status}）`);
-    const result = await response.json();
-    if (!result?.answers || typeof result.answers !== 'object') throw new Error('Jev 返回格式不正确');
+    }), signal);
+    if (!response.ok) throw { code: response.status === 401 || response.status === 403 ? 'AUTH_ERROR' : response.status === 429 ? 'RATE_LIMITED' : 'API_ERROR', message: `Jev 暂时不可用（${response.status}）` };
+    const result = await untilAborted(() => response.json(), signal);
+    if (!result?.answers || typeof result.answers !== 'object') throw { code: 'PARSE_ERROR', message: 'Jev 返回格式不正确' };
     return result;
+  } catch (error) {
+    if (signal.aborted) throw mapAbortError(signal, 'Jev 连接失败');
+    if (error instanceof TypeError) throw { code: 'NETWORK_ERROR', message: 'Jev 连接失败' };
+    if (error instanceof SyntaxError) throw { code: 'PARSE_ERROR', message: 'Jev 返回格式不正确' };
+    throw error;
   } finally { cleanup(); }
 }
 
@@ -42,7 +47,7 @@ export function buildJevEvaluation(board: BoardDSL, collaboration: Collaboration
   return { state, questions };
 }
 
-function choice(answer: any, allowed: string[]): { value: string; probability: number } | null {
+export function readJevChoice(answer: any, allowed: string[]): { value: string; probability: number } | null {
   if (answer?.type !== 'choice' || !allowed.includes(answer.choice)) return null;
   const p = answer.probabilities?.[answer.choice];
   return typeof p === 'number' && Number.isFinite(p) && p >= 0 && p <= 1 ? { value: answer.choice, probability: p } : null;
@@ -52,10 +57,10 @@ export function applyJevEvaluation(drafts: DiscoveryDraft[], answers: Record<str
   const reviews: Record<string, DiscoveryReview> = {};
   let checked = 0;
   for (let i = 0; i < drafts.length; i++) {
-    const evidence = choice(answers[`evidence_${i}`], ['grounded', 'unsupported', 'uncertain']);
-    const constraints = questions[`constraints_${i}`] ? choice(answers[`constraints_${i}`], ['fits', 'conflicts', 'uncertain']) : null;
-    const intent = questions[`intent_${i}`] ? choice(answers[`intent_${i}`], ['faithful', 'invented', 'uncertain']) : null;
-    const repeated = questions[`repeated_${i}`] ? choice(answers[`repeated_${i}`], ['new', 'repeated', 'uncertain']) : null;
+    const evidence = readJevChoice(answers[`evidence_${i}`], ['grounded', 'unsupported', 'uncertain']);
+    const constraints = questions[`constraints_${i}`] ? readJevChoice(answers[`constraints_${i}`], ['fits', 'conflicts', 'uncertain']) : null;
+    const intent = questions[`intent_${i}`] ? readJevChoice(answers[`intent_${i}`], ['faithful', 'invented', 'uncertain']) : null;
+    const repeated = questions[`repeated_${i}`] ? readJevChoice(answers[`repeated_${i}`], ['new', 'repeated', 'uncertain']) : null;
     if (!evidence || (questions[`constraints_${i}`] && !constraints) || (questions[`intent_${i}`] && !intent) || (questions[`repeated_${i}`] && !repeated)) throw new Error('Jev 未完整返回依据与条件检查');
     checked++;
     const concerns: DiscoveryReview['concerns'] = [];
@@ -66,7 +71,7 @@ export function applyJevEvaluation(drafts: DiscoveryDraft[], answers: Record<str
     if (repeated?.value === 'repeated' && repeated.probability >= .85) concerns.push('repeated');
     if (concerns.length) reviews[discoveryKey(drafts[i])] = { concerns };
   }
-  const priority = choice(answers.priority, [...drafts.map((_, i) => `candidate_${i}`), 'uncertain']);
+  const priority = readJevChoice(answers.priority, [...drafts.map((_, i) => `candidate_${i}`), 'uncertain']);
   const selected = priority && priority.probability >= .7 ? drafts.find((_, i) => priority.value === `candidate_${i}`) : undefined;
   // Preserve every result. Questionable candidates stay available with a visible review note.
   const clean = drafts.filter(d => !reviews[discoveryKey(d)]);
@@ -95,7 +100,7 @@ export async function evaluateImpact(config: NonNullable<AgentConfig['jev']>, co
   }]));
   const { answers } = await requestJev(config, context, questions, signal);
   return context.targets.flatMap((target, i) => {
-    const answer = choice(answers[`impact_${i}`], [...IMPACT_STATUSES, 'uncertain']);
+    const answer = readJevChoice(answers[`impact_${i}`], [...IMPACT_STATUSES, 'uncertain']);
     if (!answer || answer.value === 'uncertain' || answer.probability < .85) return [];
     const status = answer.value as ImpactItem['status'];
     const reasons = {

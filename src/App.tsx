@@ -407,9 +407,18 @@ export default function App() {
   function continueDiscovery(discovery: Discovery) {
     if (isPending || pendingPatch || !isAgentConfigured || !isDiscoveryCurrent(discovery, getBoard(), collaborationStateRef.current)) return;
     setActivityOpen(false);
-    selectNodes(discovery.nodeIds);
-    void submitMessage(`${discovery.action.prompt}\n\n沿着这个候选发现继续，准备可审阅的小成果：${discovery.title}\n${discovery.prepared}\n依据与限制：${discovery.reason}${discovery.jevReview?.concerns.length ? `\n独立复查提示（候选判断，需先核对再继续）：${discovery.jevReview.concerns.map(c => ({ evidence: '可能超出资料依据', constraints: '可能违反用户条件', intent: '可能把方案选择当成用户硬性要求', repeated: '可能重复已处理方向' })[c]).join('；')}` : ''}`,
-      discovery.action.label, { ...defaultTaskPolicy(discovery.nodeIds), allowExistingEdits: false, reviewChanges: true });
+    const impactReferences = collaborationStateRef.current.impactReport?.referenceNodeIds ?? [];
+    const revisions = discovery.kind === 'impact'
+      ? impacts.filter(item => item.status === 'revise' && discovery.nodeIds.includes(item.nodeId) && !impactReferences.includes(item.nodeId)) : [];
+    const targetIds = revisions.map(item => item.nodeId);
+    const referenceNodeIds = [...new Set([...discovery.nodeIds, ...impactReferences, ...revisions.flatMap(item => item.sourceIds)])].filter(id => !targetIds.includes(id));
+    const policy = targetIds.length
+      ? { ...defaultTaskPolicy(targetIds), referenceNodeIds, allowedOps: ['update_node' as const], reviewChanges: true }
+      : { ...defaultTaskPolicy(discovery.nodeIds), allowExistingEdits: false, reviewChanges: true };
+    selectNodes(targetIds.length ? targetIds : discovery.nodeIds);
+    const revisionScope = targetIds.length ? `\n请同步这些现有卡片：${targetIds.join('、')}。只用 update_node 修订这些卡片，保留规则和依据的原文，将结果作为一份修改预览。允许、建议和必须分别保留其原本强度；独立项目没有共享要求的证据时不改动，也不为此追问。` : '';
+    void submitMessage(`${discovery.action.prompt}${revisionScope}\n\n沿着这个候选发现继续，准备可审阅的小成果：${discovery.title}\n${discovery.prepared}\n依据与限制：${discovery.reason}${discovery.jevReview?.concerns.length ? `\n独立复查提示（候选判断，需先核对再继续）：${discovery.jevReview.concerns.map(c => ({ evidence: '可能超出资料依据', constraints: '可能违反用户条件', intent: '可能把方案选择当成用户硬性要求', repeated: '可能重复已处理方向' })[c]).join('；')}` : ''}`,
+      discovery.action.label, policy);
   }
 
   const [showShortcutHelp, setShowShortcutHelp] = useState(false);
@@ -1326,7 +1335,7 @@ export default function App() {
             view={activityView}
             onViewChange={setActivityView}
             discoveries={board.nodes.length ? <CollaborationPanel key={activeId} board={board} state={collaborationState}
-              current={discoveries} impacts={impacts} configured={canDiscover} busy={isPending || Boolean(pendingPatch)}
+              current={discoveries} impacts={impacts} coverage={collaborationState.impactReport?.print === proactive.print ? collaborationState.impactReport.coverage : undefined} configured={canDiscover} busy={isPending || Boolean(pendingPatch)}
               {...proactive} onPause={proactive.pause} onRefresh={proactive.refresh} onResume={proactive.resume}
               onUpdate={updater => updateCollaboration(activeId, updater)}
               onFocus={ids => { setActivityOpen(false); selectNodes(ids); requestAnimationFrame(() => focusCanvas(ids)); }}

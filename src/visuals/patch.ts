@@ -40,7 +40,18 @@ export function patchConflicts(base: BoardDSL, current: BoardDSL, patch: DSLPatc
     const before = base.nodes.find(node => node.id === id);
     const now = current.nodes.find(node => node.id === id);
     if (!before || !now || before.title !== now.title || before.body !== now.body
+      || JSON.stringify(before.tags) !== JSON.stringify(now.tags)
       || JSON.stringify(before.visual) !== JSON.stringify(now.visual)) conflicts.push(id);
+  }
+  // A change in the relationships used to authorize a revision can invalidate
+  // its project boundary even when every sentence is still identical.
+  if (sourceIds.length) {
+    const related = new Set([...sourceIds, ...patch.ops.flatMap(op => op.op === 'update_node' || op.op === 'delete_node' ? [op.nodeId] : [])]);
+    const relations = (board: BoardDSL) => JSON.stringify([
+      board.edges.filter(edge => related.has(edge.from) || related.has(edge.to)).map(edge => [edge.id, edge.from, edge.to, edge.label]).sort(),
+      board.groups.filter(group => group.nodeIds.some(id => related.has(id))).map(group => [group.id, group.title, [...group.nodeIds].sort()]).sort(),
+    ]);
+    if (relations(base) !== relations(current)) conflicts.push('references');
   }
   if (patch.presentation?.plan) {
     const ids = spatialNodeIds(patch.presentation.plan, base);

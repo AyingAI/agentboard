@@ -1,4 +1,4 @@
-import type { AgentAdapter, AgentError, AgentProgressEvent, AgentRequest } from './types';
+import type { AgentAdapter, AgentError, AgentProgressEvent, AgentRequest, LocalCliPurpose } from './types';
 import { buildSystemPrompt, buildUserMessage } from './prompts';
 import { fallbackInteractionFromText, parseAgentResponse } from './response';
 import { mapAbortError, withTimeout } from './resilience';
@@ -27,7 +27,7 @@ export async function runLocalCli(
   userMessage: string,
   externalSignal?: AbortSignal,
   requestProgress?: (event: AgentProgressEvent) => void,
-  purpose?: 'discovery',
+  purpose?: LocalCliPurpose,
 ): Promise<string> {
   let res: Response;
   const { signal, cleanup } = withTimeout(externalSignal, LOCAL_CLI_TIMEOUT_MS);
@@ -71,7 +71,7 @@ export async function runLocalCli(
       return await pollLocalCliResult(requestId, signal, requestProgress);
     }
   } catch (err) {
-    if ((err as AgentError)?.code) throw err;
+    if (!signal.aborted && typeof (err as AgentError)?.code === 'string') throw err;
     throw mapAbortError(signal, '无法连接到本地 CLI 桥接服务。请确认 dev server 正在运行（npm run dev）。');
   } finally {
     signal.removeEventListener('abort', cancelServerRun);
@@ -95,7 +95,7 @@ export async function pollLocalCliResult(
     }
 
     if (response.status === 404) {
-      return buildLostRunInteractionJson(requestId);
+      throw { code: 'API_ERROR', reason: 'incomplete', retryable: false, message: '本地 Agent 运行状态已丢失。原请求已保留，可直接重新尝试。' } satisfies AgentError;
     }
     if (!response.ok) {
       throw {
@@ -108,12 +108,15 @@ export async function pollLocalCliResult(
       status: 'running' | 'completed' | 'failed' | 'cancelled';
       text?: string;
       error?: string;
+      code?: AgentError['code'];
+      retryable?: boolean;
     };
     if (body.status === 'completed' && typeof body.text === 'string') return body.text;
     if (body.status === 'failed' || body.status === 'cancelled') {
       throw {
-        code: 'API_ERROR',
+        code: body.code ?? 'API_ERROR',
         message: body.error || (body.status === 'cancelled' ? '本地 Agent 已取消。' : '本地 Agent 执行失败。'),
+        retryable: body.retryable,
       } satisfies AgentError;
     }
 
@@ -125,32 +128,6 @@ export async function pollLocalCliResult(
   }
 
   throw mapAbortError(signal, '本地 Agent 查询已中断。');
-}
-
-function buildLostRunInteractionJson(requestId: string): string {
-  return JSON.stringify({
-    type: 'interaction_request',
-    runId: requestId,
-    kind: 'clarification',
-    title: '本地 Agent 运行状态已丢失',
-    message: [
-      '本地 CLI 的后台运行记录已经不存在，常见原因是 dev server 重启、连接中断后内存状态被清空，或本地进程被系统回收。',
-      '这不是白板数据损坏。建议用更小范围继续执行，避免再次触发长时间运行。',
-    ].join('\n\n'),
-    options: [
-      {
-        id: 'retry_smaller',
-        label: '缩小范围重试',
-        description: '聚焦最相关的内容，保留已有成果后继续。',
-      },
-      {
-        id: 'custom_scope',
-        label: '我重新描述范围',
-        description: '手动输入更小、更明确的任务。',
-      },
-    ],
-    allowFreeText: true,
-  });
 }
 
 function wait(ms: number, signal: AbortSignal): Promise<void> {
@@ -192,6 +169,7 @@ export class LocalCliAdapter implements AgentAdapter {
         userMessage,
         request.signal,
         request.onProgress,
+        request.purpose,
       );
     } catch (err) {
       // Network / API / abort errors already have code, re-throw

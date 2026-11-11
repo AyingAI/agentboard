@@ -40,9 +40,9 @@ export function withTimeout(
 ): { signal: AbortSignal; cleanup: () => void } {
   const controller = new AbortController();
 
-  const onExternalAbort = () => controller.abort({ kind: 'external' });
+  const onExternalAbort = () => controller.abort(external?.reason ?? { kind: 'external' });
   if (external) {
-    if (external.aborted) controller.abort({ kind: 'external' });
+    if (external.aborted) onExternalAbort();
     else external.addEventListener('abort', onExternalAbort, { once: true });
   }
 
@@ -57,6 +57,16 @@ export function withTimeout(
   };
 }
 
+/** Enforce cancellation even when an adapter ignores its AbortSignal. */
+export function untilAborted<T>(operation: () => Promise<T>, signal: AbortSignal): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const abort = () => reject(mapAbortError(signal, '调用已中断'));
+    if (signal.aborted) { abort(); return; }
+    signal.addEventListener('abort', abort, { once: true });
+    Promise.resolve().then(operation).then(resolve, reject).finally(() => signal.removeEventListener('abort', abort));
+  });
+}
+
 /**
  * Map a fetch rejection to a structured AgentError, distinguishing a real
  * network failure from a timeout vs a user cancellation. `signal` is the
@@ -64,10 +74,10 @@ export function withTimeout(
  */
 export function mapAbortError(signal: AbortSignal, fallbackMessage: string): AgentError {
   const reason = (signal.reason ?? {}) as { kind?: string };
-  if (reason.kind === 'timeout') {
+  if (reason.kind === 'timeout' || (signal.reason as { name?: string })?.name === 'TimeoutError') {
     return { code: 'TIMEOUT', message: '调用超时，请重试或检查网络 / 本地 CLI 是否卡住。', retryable: true };
   }
-  if (reason.kind === 'external') {
+  if (['external', 'disabled', 'stale'].includes(reason.kind ?? '') || signal.aborted) {
     return { code: 'ABORTED', message: '已取消。', retryable: false };
   }
   return { code: 'NETWORK_ERROR', message: fallbackMessage, retryable: true };

@@ -1,13 +1,13 @@
 import { useRef, useState } from 'react';
-import type { BoardDSL, CollaborationState, Discovery, ImpactItem } from '../types/dsl';
+import type { BoardDSL, CollaborationState, Discovery, ImpactCoverage, ImpactItem } from '../types/dsl';
 import { dailyLimit, discoveryDecision, hasBudget, isDiscoveryCurrent, projectGoal } from '../agent/discoveries';
 import { ExplorationDialog } from './Exploration';
 import './collaboration.css';
 
 interface Props {
   board: BoardDSL; state: CollaborationState; enabled: boolean; configured: boolean; busy: boolean;
-  current: Discovery[]; impacts: ImpactItem[];
-  status: 'idle' | 'working' | 'error'; message: string; jevMessage: string;
+  current: Discovery[]; impacts: ImpactItem[]; coverage?: ImpactCoverage;
+  status: 'idle' | 'working' | 'error'; message: string;
   onUpdate: (update: (current: CollaborationState) => CollaborationState) => void;
   onPause: () => void; onRefresh: () => void; onResume: () => void;
   onFocus: (ids: string[]) => void; onSave: (discovery: Discovery) => void; onContinue: (discovery: Discovery) => void;
@@ -29,7 +29,7 @@ export default function CollaborationPanel(props: Props) {
   const [showHistory, setShowHistory] = useState(false);
   const draftCards = useRef(new Map<string, HTMLElement>());
   const previous = state.discoveries.filter(d => !current.includes(d));
-  const hasImpact = impacts.some(item => item.status !== 'keep');
+  const hasImpact = impacts.some(item => item.status !== 'keep') || Boolean(props.coverage?.unreviewedCount || props.coverage?.truncatedCount);
   const budgetAvailable = hasBudget(state);
   const canRun = configured && !busy && status !== 'working';
 
@@ -50,6 +50,8 @@ export default function CollaborationPanel(props: Props) {
       </div> : null}
       {hasImpact ? <section className="impact-summary" aria-label="这次变化影响了什么">
         <h3>这次变化影响了什么</h3>
+        {props.coverage?.unreviewedCount ? <p>还有 {props.coverage.unreviewedCount} 张候选或变化尚未完成判断，本次结果未覆盖整张白板。</p> : null}
+        {props.coverage?.truncatedCount ? <p>有 {props.coverage.truncatedCount} 张相关卡片的正文尚未读全，未读到的条件仍需核对。</p> : null}
         {IMPACT_ORDER.map(status => {
           const items = impacts.filter(item => item.status === status);
           return items.length ? <details key={`${state.impactReport?.print}:${status}`} className="impact-group" open={status !== 'keep'}>
@@ -103,7 +105,6 @@ export default function CollaborationPanel(props: Props) {
         <p>目标 · {projectGoal(board, state)}</p>
         {state.constraints ? <p>{state.constraints}</p> : null}
         {state.understanding ? <details><summary>Agent 对任务的理解</summary><p>{state.understanding}</p></details> : null}
-        {props.jevMessage ? <p>{props.jevMessage}</p> : null}
         <div className="collaboration-controls">
           <button type="button" onClick={() => editContext()}>目标与条件</button>
           {configured ? <>
