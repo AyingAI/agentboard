@@ -30,6 +30,11 @@ export interface EdgeStyle {
 export const NODE_TYPES = ['card', 'note'] as const;
 export type NodeType = (typeof NODE_TYPES)[number];
 
+export const SEMANTIC_NODE_TAGS = [
+  'concept', 'module', 'actor', 'input', 'output', 'decision', 'risk',
+  'question', 'assumption', 'metric', 'evidence', 'action',
+] as const;
+
 /** Open-ended model-authored content. The host manages identity, not its UI vocabulary. */
 export interface VisualContent {
   html: string;
@@ -367,7 +372,10 @@ export interface LocalCliInfo {
   installations?: LocalCliInstallation[];
 }
 
-export interface EvidenceIssue { nodeId: string; sourceTitle: string; text: string }
+export interface BoardBrief {
+  goal?: string;
+  constraints?: string;
+}
 
 export interface AgentConfig {
   provider: AgentProvider;
@@ -379,78 +387,6 @@ export interface AgentConfig {
   baseUrl?: string;
   /** API response budget. Models and compatible endpoints have different limits. */
   maxOutputTokens?: number;
-  /** Optional evaluator; never required by the main Agent. */
-  jev?: { enabled: boolean; apiKey: string; model?: string; evidenceReview?: boolean };
-}
-
-// Proactive collaboration is separate from board patches: discovering is not editing.
-export const DISCOVERY_KINDS = ['connection', 'gap', 'impact', 'next_step'] as const;
-export interface DiscoveryDraft {
-  kind: (typeof DISCOVERY_KINDS)[number];
-  title: string;
-  reason: string;
-  /** An actual prepared comparison, outline or alternative. */
-  prepared: string;
-  nodeIds: string[];
-  action: { label: string; prompt: string };
-}
-export interface DiscoveryResponse {
-  type: 'discovery';
-  understanding: string;
-  discoveries: DiscoveryDraft[];
-  impacts?: ImpactItem[];
-}
-export const IMPACT_STATUSES = ['revise', 'verify', 'keep'] as const;
-export interface ImpactItem {
-  nodeId: string;
-  status: (typeof IMPACT_STATUSES)[number];
-  reason: string;
-  sourceIds: string[];
-}
-export interface ImpactContext {
-  previous?: { goal: string; constraints: string };
-  current: { goal: string; constraints: string };
-  changes: { id: string; title: string; body: string; kind: 'added' | 'edited'; truncated: boolean }[];
-  removedIds: string[];
-  omittedTargetCount?: number;
-  omittedChangeCount?: number;
-  targets: { id: string; title: string; body: string; truncated: boolean; sourceIds: string[] }[];
-}
-export interface ImpactCoverage { unreviewedCount: number; truncatedCount: number }
-export interface ImpactReport { print: string; items: ImpactItem[]; referenceNodeIds?: string[]; coverage?: ImpactCoverage }
-export interface Discovery extends DiscoveryDraft {
-  id: string;
-  createdAt: number;
-  status: 'new' | 'saved' | 'dismissed';
-  sourcePrints: Record<string, string>;
-  contextPrint: string;
-  relationPrint: string;
-  savedNodeId?: string;
-  jevReview?: DiscoveryReview;
-}
-export const DISCOVERY_CONCERNS = ['evidence', 'constraints', 'intent', 'repeated'] as const;
-export interface DiscoveryReview { concerns: (typeof DISCOVERY_CONCERNS)[number][] }
-export interface DiscoveryEvaluation {
-  drafts: DiscoveryDraft[];
-  reviews: Record<string, DiscoveryReview>;
-  checked: number;
-  flagged: number;
-  reordered: boolean;
-}
-export interface CollaborationState {
-  enabled?: boolean;
-  goal?: string;
-  constraints?: string;
-  understanding?: string;
-  checkedPrint?: string;
-  checkedAt?: number;
-  checkedNodes?: Record<string, string>;
-  checkedContext?: ImpactContext['current'];
-  impactReport?: ImpactReport;
-  discoveries: Discovery[];
-  budget?: { day: string; calls: number };
-  /** Null means automatic analysis has no daily cap. */
-  dailyLimit?: number | null;
 }
 
 // ── Board session types ──
@@ -464,6 +400,8 @@ export interface AgentTaskPolicy {
   allowExistingEdits: boolean;
   allowDelete: boolean;
   allowFullBoardLayout: boolean;
+  /** Include the content of every card in the model request. */
+  includeFullBoard?: boolean;
   /** Explicit host action: infer spatial relationships, with no content operations. */
   layoutOnly?: boolean;
   /** Let the user review any proposed addition before applying it. */
@@ -489,9 +427,6 @@ export interface RunState {
     activityId: string;
     patch: DSLPatch;
     baseBoard: BoardDSL;
-    evidenceSourceId?: string;
-    evidenceNote?: string;
-    evidenceIssues?: EvidenceIssue[];
     projectContext?: string;
   };
 }
@@ -515,7 +450,6 @@ export interface BoardSession {
   runs?: Record<string, RunState>;
   /** Transaction-level board history, persisted for undo/redo across refreshes. */
   history?: BoardHistory;
-  collaboration?: CollaborationState;
   createdAt: number;
   updatedAt: number;
 }

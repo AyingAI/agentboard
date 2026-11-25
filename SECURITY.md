@@ -1,23 +1,29 @@
 # Security Policy
 
-AgentBoard runs locally and uses the model connections you configure.
+AgentBoard stores boards, activity, and API settings in the browser's `localStorage`. API keys are accessible to the local browser profile and scripts running on the app's origin. Use a trusted browser profile and deployment.
 
-## Secrets
+## API connections
 
-Do not commit API keys, local credentials, `.env` files, exported browser storage, or generated artifacts that may contain private data.
+API mode sends your prompt and board context to your configured service. Whole-board insights include the complete body of every card. The connection test uses a fixed example. Model discovery sends credentials to the configured provider's models endpoint.
 
-API keys entered in the UI are stored in browser `localStorage`. Treat the browser profile and local machine as trusted local state.
+API requests require HTTPS, with HTTP supported for loopback addresses. AgentBoard omits browser cookies and referrers on API requests and rejects redirects. When you change the provider or effective Base URL in settings, enter the corresponding API key again.
 
-API mode sends the prompt and relevant board context to the configured model endpoint. Source checking before delivery is off by default. When enabled for an eligible edit, it sends the selected source text and draft factual sentences to TypeSafe. The connection test uses a fixed example. Exports contain card content and visual state.
+## Local CLI bridge
 
-## Local CLI Bridge
+Run the Vite server on `127.0.0.1` or `localhost`. The CLI bridge checks the loopback connection, Host, and browser origin, and limits the size of JSON request bodies. The bridge is available through the development server.
 
-Run the Vite server on `127.0.0.1` or `localhost`. The CLI and Jev endpoints check the loopback connection, Host and browser origin. JSON request bodies have size limits. The CLI bridge is available only in the development server and runs installed executables with their local permissions and credentials. Foreground CLI tasks can use the selected CLI's tools. Background analysis uses a narrower execution profile.
+A CLI run uses the installed executable and its local credentials and permissions. The CLI can use the tools and services available to it and may retain its own logs. The board's patch permissions govern changes to the board.
 
 ## Interactive visuals
 
-Visual scripts run in sandboxed frames with opaque origins. A dedicated message port carries host state to the original frame document. The frame cannot access host storage or submit an Agent run, and its CSP restricts network APIs and embedded resources. Allowed CDN scripts can make script requests, and a frame can navigate itself. Import boards and use scripts from sources you trust.
+Visual scripts run in sandboxed frames with opaque origins. A dedicated message port provides visual state to the original frame document. The iframe has no direct access to host storage, and its API can draft an agent request for user review. The frame's Content Security Policy restricts network APIs and embedded resources. Allowed CDN scripts can make requests to those CDNs, and a frame can navigate itself. Import boards and run visual scripts from sources you trust.
 
-## Reporting Issues
+## Sharing
 
-Use GitHub private vulnerability reporting where available. If it is unavailable, ask the maintainer for a private reporting channel before sharing credentials, personal data or exploit details.
+Review exports, screenshots, and traces before sharing. Markdown and JSON exports can contain board goals, card text, source URLs, and visual state. JSON backups also include the visual source. The board export includes the board and its title. API settings and activity history live separately in the browser.
+
+Keep keys, local credentials, `.env` files, exported browser storage, and private board data out of commits and public issues.
+
+## Reporting issues
+
+Use GitHub private vulnerability reporting where available. If it is unavailable, ask the maintainer for a private reporting channel before sharing credentials, personal data, or reproduction details.

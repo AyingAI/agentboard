@@ -33,10 +33,9 @@ export default function PatchReview({ proposal, onClose, onApply }: {
     <div ref={dialog} className="patch-review-dialog" role="dialog" aria-modal="true" aria-labelledby="review-title" tabIndex={-1}>
       <header><div><small>修改预览 · 白板尚未改变</small><h2 id="review-title">{proposal.patch.summary}</h2></div><button type="button" onClick={onClose} aria-label="关闭修改预览">×</button></header>
       <div className="review-scroll">
-        {proposal.evidenceNote && !proposal.evidenceIssues?.length ? <p>{proposal.evidenceNote}</p> : null}
         {[...ids].map(id => <section className="review-comparison" key={id}>
           <div><span className="review-label">当前版本</span><Preview node={proposal.baseBoard.nodes.find(n => n.id === id)} /></div>
-          <div>{proposal.evidenceIssues?.filter(issue => issue.nodeId === id).map((issue, index) => <p key={index} role="note">「{issue.sourceTitle}」未能支持草案中的「{issue.text}」。应用前请核对这处说法。</p>)}<span className="review-label proposed">提议版本</span><Preview node={outcome.board.nodes.find(n => n.id === id)} /></div>
+          <div><span className="review-label proposed">提议版本</span><Preview node={outcome.board.nodes.find(n => n.id === id)} /></div>
         </section>)}
         {!ids.size ? <p>此次修改涉及连线、分组或布局：{proposal.patch.ops.map(op => op.op).join('、')}。</p> : null}
       </div>

@@ -20,8 +20,10 @@ describe('API streaming', () => {
   it('rejects an interrupted stream even when it happens to end with valid JSON', async () => {
     await expect(readApiStream(response(frame({ choices: [{ delta: { content: '{}' } }] })), 'openai', new AbortController().signal)).rejects.toThrow('中断');
   });
-  it('surfaces streaming provider errors and exhausted budgets', async () => {
-    await expect(readApiStream(response(frame({ error: { message: '服务忙' } })), 'openai', new AbortController().signal)).rejects.toThrow('服务忙');
+  it('reports streaming errors without copying provider details and still identifies exhausted budgets', async () => {
+    const error = frame({ error: { message: 'debug details with synthetic credentials' } });
+    await expect(readApiStream(response(error), 'openai', new AbortController().signal))
+      .rejects.toThrow(/^服务暂时无法完成生成$/);
     await expect(readApiStream(response(frame({ choices: [{ delta: { content: '{}' }, finish_reason: 'length' }] })), 'openai', new AbortController().signal)).rejects.toThrow('输出预算');
   });
   it('cancels a reader waiting for the next byte', async () => {

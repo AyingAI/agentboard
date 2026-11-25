@@ -24,7 +24,7 @@ export async function readApiStream(response: Response, provider: 'openai' | 'cl
       lastSignal = now;
       onProgress?.({ type: 'heartbeat', message: '正在接收服务反馈' });
     }
-    if (value.error || value.type === 'error') throw new Error(value.error?.message || '服务暂时无法完成生成');
+    if (value.error || value.type === 'error') throw new Error('服务暂时无法完成生成');
     if (provider === 'openai') {
       const delta = value.choices?.[0]?.delta?.content;
       if (typeof delta === 'string') { text += delta; report(); }

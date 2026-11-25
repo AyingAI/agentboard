@@ -2,13 +2,8 @@ import type { AgentAdapter, AgentError, AgentRequest } from './types';
 import { buildSystemPrompt, buildUserMessage } from './prompts';
 import { fallbackInteractionFromText, parseAgentResponse } from './response';
 import { readApiStream } from './apiStream';
+import { apiFetchOptions, INVALID_API_BASE_URL, normalizeApiBaseUrl } from './apiEndpoint';
 import { DEFAULT_TIMEOUT_MS, mapAbortError, withTimeout } from './resilience';
-
-function normalizeOpenAIBaseUrl(rawUrl: string | undefined) {
-  const value = (rawUrl || 'https://api.openai.com/v1').trim().replace(/\/+$/, '');
-  if (/\/v\d+$/i.test(value)) return value;
-  return `${value}/v1`;
-}
 
 export class OpenAIAgentAdapter implements AgentAdapter {
   readonly name: string;
@@ -22,6 +17,8 @@ export class OpenAIAgentAdapter implements AgentAdapter {
       throw { code: 'AUTH_ERROR', message: '未配置 OpenAI API Key' } satisfies AgentError;
     }
 
+    const baseUrl = normalizeApiBaseUrl('openai', this.config.baseUrl);
+    if (!baseUrl) throw { code: 'API_ERROR', message: INVALID_API_BASE_URL, retryable: false } satisfies AgentError;
     const systemPrompt = buildSystemPrompt();
     const userMessage = buildUserMessage(request.boardState, request.userMessage, {
       runId: request.runId,
@@ -29,12 +26,11 @@ export class OpenAIAgentAdapter implements AgentAdapter {
       recentEditEvents: request.recentEditEvents,
       taskPolicy: request.taskPolicy,
     });
-    const baseUrl = normalizeOpenAIBaseUrl(this.config.baseUrl);
-
     let response: Response;
     const { signal, cleanup } = withTimeout(request.signal, DEFAULT_TIMEOUT_MS);
     try {
       response = await fetch(`${baseUrl}/chat/completions`, {
+        ...apiFetchOptions,
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -78,17 +74,20 @@ export class OpenAIAgentAdapter implements AgentAdapter {
       }
     } catch (err) {
       if (signal.aborted) throw mapAbortError(signal, '生成已中断');
-      throw { code: 'PARSE_ERROR', message: err instanceof Error ? err.message : '无法解析 OpenAI API 响应', rawText: String(err) } satisfies AgentError;
+      throw {
+        code: 'PARSE_ERROR',
+        message: err instanceof Error && !(err instanceof SyntaxError) ? err.message : '无法解析 OpenAI API 响应',
+      } satisfies AgentError;
     } finally {
       cleanup();
     }
 
     try {
       return parseAgentResponse(text);
-    } catch (err) {
+    } catch {
       const interaction = fallbackInteractionFromText(text, request.runId ?? `run_${Date.now()}`);
       if (interaction) return interaction;
-      throw { code: 'PARSE_ERROR', message: `OpenAI 返回内容不是合法的 AgentBoard 响应：${err instanceof Error ? err.message : String(err)}`, rawText: text.slice(0, 2000) } satisfies AgentError;
+      throw { code: 'PARSE_ERROR', message: 'OpenAI 返回内容不是合法的 AgentBoard 响应。' } satisfies AgentError;
     }
   }
 }

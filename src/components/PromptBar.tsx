@@ -19,6 +19,7 @@ function ComposerIcon({ name }: { name: 'board' | 'selection' | 'arrow' | 'chevr
 
 interface PromptBarProps {
   feedback?: ReactNode;
+  isEmptyBoard?: boolean;
   input: string;
   onInputChange: (value: string) => void;
   onSubmit: () => void;
@@ -36,7 +37,7 @@ interface PromptBarProps {
   onClearTargets: () => void;
 }
 
-export default function PromptBar({ feedback, input, onInputChange, onSubmit, onCancel, onOpenConfig, isPending, isAgentConfigured, providerName, selectedNodeIds, taskPolicy, onTaskPolicyChange, referencedNodes, visualReference, onClearReference, onClearTargets }: PromptBarProps) {
+export default function PromptBar({ feedback, isEmptyBoard, input, onInputChange, onSubmit, onCancel, onOpenConfig, isPending, isAgentConfigured, providerName, selectedNodeIds, taskPolicy, onTaskPolicyChange, referencedNodes, visualReference, onClearReference, onClearTargets }: PromptBarProps) {
   const [stopRequested, setStopRequested] = useState(false);
   const [showControls, setShowControls] = useState(false);
   const [activated, setActivated] = useState(false);
@@ -46,7 +47,7 @@ export default function PromptBar({ feedback, input, onInputChange, onSubmit, on
   const permissionTrigger = useRef<HTMLButtonElement>(null);
   const hintId = useId();
   const permissionsId = useId();
-  const expanded = activated || Boolean(input.trim()) || Boolean(visualReference) || showControls;
+  const expanded = Boolean(isEmptyBoard) || activated || Boolean(input.trim()) || Boolean(visualReference) || showControls;
   useDismissibleLayer({ open: activated && !input.trim() && !visualReference && !showControls, root: composerRoot, onDismiss: () => setActivated(false) });
   useDismissibleLayer({ open: showControls, root: permissionRoot, onDismiss: () => setShowControls(false), returnFocus: permissionTrigger });
 
@@ -107,7 +108,7 @@ export default function PromptBar({ feedback, input, onInputChange, onSubmit, on
           </div>
         </div>
         <div className="composer-utilities">
-          {!input.trim() && !visualReference ? <button type="button" className="composer-collapse" aria-label="收起输入" aria-expanded={true} onClick={() => { setShowControls(false); setActivated(false); textareaRef.current?.blur(); }}><ComposerIcon name="chevron" /></button> : null}
+          {!input.trim() && !visualReference && !isEmptyBoard ? <button type="button" className="composer-collapse" aria-label="收起输入" aria-expanded={true} onClick={() => { setShowControls(false); setActivated(false); textareaRef.current?.blur(); }}><ComposerIcon name="chevron" /></button> : null}
           <div className="composer-permission-anchor" ref={permissionRoot}>
             <button ref={permissionTrigger} type="button" className={`prompt-permission-toggle ${showControls ? 'active' : ''}`}
               aria-label="修改权限" aria-expanded={showControls} aria-controls={permissionsId} aria-haspopup="dialog"
@@ -118,6 +119,7 @@ export default function PromptBar({ feedback, input, onInputChange, onSubmit, on
                 <label><input type="checkbox" checked={taskPolicy.allowExistingEdits} onChange={event => onTaskPolicyChange({ ...taskPolicy, allowExistingEdits: event.target.checked })} /><span><strong>修改现有内容</strong><small>允许改写节点和分组</small></span></label>
                 <label><input type="checkbox" checked={taskPolicy.allowDelete} onChange={event => onTaskPolicyChange({ ...taskPolicy, allowDelete: event.target.checked })} /><span><strong>删除内容</strong><small>应用前仍会请你确认</small></span></label>
                 <label><input type="checkbox" checked={taskPolicy.allowFullBoardLayout} onChange={event => onTaskPolicyChange({ ...taskPolicy, allowFullBoardLayout: event.target.checked })} /><span><strong>整理全图布局</strong><small>允许移动整张白板</small></span></label>
+                <label><input type="checkbox" checked={Boolean(taskPolicy.reviewChanges)} onChange={event => onTaskPolicyChange({ ...taskPolicy, reviewChanges: event.target.checked })} /><span><strong>所有修改先预览确认</strong><small>新增卡片也先经过确认再上板</small></span></label>
               </div>
             </div> : null}
           </div>

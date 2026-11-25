@@ -1,4 +1,4 @@
-import type { AgentAdapter, AgentError, AgentProgressEvent, AgentRequest, LocalCliPurpose } from './types';
+import type { AgentAdapter, AgentError, AgentProgressEvent, AgentRequest } from './types';
 import { buildSystemPrompt, buildUserMessage } from './prompts';
 import { fallbackInteractionFromText, parseAgentResponse } from './response';
 import { mapAbortError, withTimeout } from './resilience';
@@ -27,7 +27,6 @@ export async function runLocalCli(
   userMessage: string,
   externalSignal?: AbortSignal,
   requestProgress?: (event: AgentProgressEvent) => void,
-  purpose?: LocalCliPurpose,
 ): Promise<string> {
   let res: Response;
   const { signal, cleanup } = withTimeout(externalSignal, LOCAL_CLI_TIMEOUT_MS);
@@ -43,7 +42,7 @@ export async function runLocalCli(
     res = await fetch('/api/agent/run', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ requestId, cliId, systemPrompt, userMessage, purpose }),
+      body: JSON.stringify({ requestId, cliId, systemPrompt, userMessage }),
       signal,
     });
 
@@ -169,7 +168,6 @@ export class LocalCliAdapter implements AgentAdapter {
         userMessage,
         request.signal,
         request.onProgress,
-        request.purpose,
       );
     } catch (err) {
       // Network / API / abort errors already have code, re-throw

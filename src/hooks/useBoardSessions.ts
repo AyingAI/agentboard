@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { ActivityEntry, BoardDSL, BoardHistory, BoardSession, CollaborationState, RunState } from '../types/dsl';
+import type { ActivityEntry, BoardDSL, BoardHistory, BoardSession, RunState } from '../types/dsl';
 import { emptyBoard, isDefaultBoardTitle } from '../data/initialBoard';
 import { loadSessions, saveSessions } from '../storage';
 
@@ -182,13 +182,6 @@ export function useBoardSessions() {
     draftSaveTimer.current = setTimeout(() => persist(latest.current), 300);
   }, [persist]);
 
-  const updateCollaboration = useCallback((sessionId: string, update: (current: CollaborationState) => CollaborationState) => {
-    const data = latest.current;
-    if (!data.sessions.some(session => session.id === sessionId)) return;
-    persist({ ...data, sessions: data.sessions.map(session => session.id === sessionId
-      ? { ...session, collaboration: update(session.collaboration ?? { discoveries: [] }) } : session) });
-  }, [persist]);
-
   return {
     sessions,
     activeId,
@@ -204,6 +197,5 @@ export function useBoardSessions() {
     updateActiveBoard,
     updateActiveAgentState,
     updateActiveDraft,
-    updateCollaboration,
   };
 }

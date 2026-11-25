@@ -32,14 +32,14 @@ test('CLI menu matches settings style and persists the selected tool', async ({ 
   await expect(page.getByRole('dialog')).toBeVisible();
 });
 
-test('first connection selects installed Pi and keeps a saved alternative on reopen', async ({ page }) => {
+test('first connection selects installed Claude Code and keeps a saved alternative on reopen', async ({ page }) => {
   await page.route('**/api/clis**', route => route.fulfill({ json: clis() }));
   await page.goto('/');
   await page.getByRole('button', { name: 'Agent 设置', exact: true }).click();
   const picker = page.getByRole('combobox', { name: '选择 CLI', exact: true });
-  await expect(picker).toContainText('Pi CLI');
+  await expect(picker).toContainText('Claude Code');
   await picker.click();
-  await expect(page.getByRole('option').first()).toContainText('Pi CLI');
+  await expect(page.getByRole('option').first()).toContainText('Claude Code');
   await page.getByRole('option', { name: /Codex CLI/ }).click();
   await page.getByRole('button', { name: '关闭 Agent 设置' }).click();
   await page.reload();
@@ -61,7 +61,7 @@ test('keyboard navigation selects an option and Escape closes only the open menu
   await settings(page);
   const picker = page.getByRole('combobox', { name: '选择 CLI', exact: true });
   await picker.focus(); await picker.press('ArrowDown'); await picker.press('ArrowDown'); await picker.press('Enter');
-  await expect(picker).toContainText('Codex CLI');
+  await expect(picker).toContainText('OpenCode');
   await picker.press('Enter'); await picker.press('Escape');
   await expect(page.getByRole('listbox')).toHaveCount(0);
   await expect(page.getByRole('dialog')).toBeVisible();
@@ -80,6 +80,26 @@ test('provider and model menus share the same interaction and support search', a
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem('agentboard.config')!).model)).toBe('gpt-4o-mini');
 });
 
+test('changing the API endpoint or provider clears the previous connection key', async ({ page }) => {
+  await settings(page);
+  const provider = page.getByRole('combobox', { name: '连接方式', exact: true });
+  await provider.click();
+  await page.getByRole('option', { name: /OpenAI \/ 兼容 API/ }).click();
+  const key = page.getByLabel('API Key', { exact: true });
+  const address = page.getByPlaceholder('https://api.openai.com/v1');
+  await address.fill('https://first-provider.example/v1');
+  await key.fill('synthetic-first-key');
+  await address.fill('https://first-provider.example/v1/');
+  await expect(key).toHaveValue('synthetic-first-key');
+  await address.fill('https://second-provider.example/v1');
+  await expect(key).toHaveValue('');
+  await key.fill('synthetic-second-key');
+  await provider.click();
+  await page.getByRole('option', { name: /Claude API/ }).click();
+  await expect(key).toHaveValue('');
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('agentboard.config')!).apiKey)).toBeUndefined();
+});
+
 test('menu fits a smaller viewport without clipping its options', async ({ page }) => {
   await page.setViewportSize({ width: 760, height: 600 });
   await settings(page);
@@ -91,32 +111,16 @@ test('menu fits a smaller viewport without clipping its options', async ({ page 
   await expect(page.getByRole('combobox', { name: '选择 CLI', exact: true })).toContainText('Gemini CLI');
 });
 
-test('Jev switch is separate from connection details and preserves the saved connection', async ({ page }) => {
-  await page.addInitScript(() => localStorage.setItem('agentboard.config', JSON.stringify({ provider: 'local-cli', cliId: 'pi',
-    jev: { enabled: true, apiKey: 'test-key-not-a-credential', model: 'jev-latest' } })));
+test('legacy jev config in localStorage is sanitized cleanly without breaking settings', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('agentboard.config', JSON.stringify({
+    provider: 'local-cli',
+    cliId: 'pi',
+    jev: { enabled: true, apiKey: 'legacy-key', model: 'jev-latest' },
+  })));
   await page.route('**/api/clis**', route => route.fulfill({ json: clis() }));
-  await page.route('**/api/jev/evaluate', route => route.fulfill({ json: { model: 'jev-latest', answers: { connected: { type: 'noul', noul: .99 } } } }));
   await page.goto('/');
   await page.getByRole('button', { name: 'Agent 设置', exact: true }).click();
-  const card = page.getByRole('region', { name: '交付前核对依据', exact: true });
-  const toggle = card.getByRole('switch', { name: '启用交付前核对依据' });
-  await expect(toggle).toHaveAttribute('aria-checked', 'false');
-  await toggle.click();
-  await expect(toggle).toHaveAttribute('aria-checked', 'true');
-  await expect(card.getByLabel('Jev API 密钥')).toBeHidden();
-  await toggle.focus();
-  await toggle.press('Space');
-  await expect(toggle).toHaveAttribute('aria-checked', 'false');
-  await expect(card.getByText('已关闭')).toBeVisible();
-  await card.getByText('连接设置', { exact: true }).click();
-  await expect(card.getByLabel('Jev API 密钥')).toHaveValue('test-key-not-a-credential');
-  await expect(card.getByLabel('Jev API 密钥')).toHaveAttribute('type', 'password');
-  await expect(card.getByRole('checkbox')).toHaveCount(0);
-  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('agentboard.config')!).jev.evidenceReview)).toBe(false);
-  await toggle.click();
-  await card.getByRole('button', { name: '测试连接' }).click();
-  await expect(card.getByRole('status')).toHaveText('连接成功 · jev-latest');
-  await page.setViewportSize({ width: 390, height: 844 });
-  await card.scrollIntoViewIfNeeded();
-  expect(await card.evaluate(element => element.scrollHeight - element.clientHeight)).toBeLessThanOrEqual(1);
+  await expect(page.getByRole('combobox', { name: '选择 CLI', exact: true })).toContainText('Pi CLI');
+  await expect(page.getByText('交付前核对依据')).toHaveCount(0);
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('agentboard.config')!).jev)).toBeUndefined();
 });

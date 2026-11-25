@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.6.0 — 2026-11-26
+
+- Use one editable canvas for cards, connections, grouping, spatial layouts, and interactive HTML, SVG, and JavaScript. Add a built-in pricing sandbox that runs without an agent connection.
+- Add actions for single and multiple card selections, semantic roles that preserve custom tags, Markdown cards with interactive checklists, and paste-to-card support.
+- Save board goals and constraints and migrate these fields from older sessions. Include them in Smart Layout and provide on-demand whole-board insights. Remove the separate exploration mode, automatic background analysis, and TypeSafe checks.
+- Export the whole board or selected cards to Markdown, including on narrow screens. Keep JSON backup available from the export dialog.
+- Open the layout and insight menus without resizing the toolbar or moving the canvas.
+- Require HTTPS for remote API endpoints, reject API redirects, clear the saved key when changing connection details, and keep raw API errors out of activity history.
+
 ## 0.5.0 — 2026-11-11
 
 - Release source checking before delivery as an opt-in feature for research edits based on one identifiable source. Remove broad JEV impact screening and discovery ranking from background analysis. Preserve saved connections and explicit source-checking consent through one switch.

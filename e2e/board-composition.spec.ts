@@ -36,10 +36,8 @@ async function init(page: Page, board: unknown) {
 }
 const stored = (page: Page) => page.evaluate(() => JSON.parse(localStorage.getItem('agentboard.sessions')!).sessions[0]);
 async function settled(page: Page, count: number) {
-  await expect.poll(async () => (await page.locator('.board-node').count()) + (await page.locator('.semantic-map-node').count())).toBe(count);
-  await expect(page.locator('.canvas-content.presentation-settling')).toHaveCount(0);
-  if (await page.locator('.semantic-map-node').count()) await page.getByRole('button', { name: '内容', exact: true }).click();
   await expect(page.locator('.board-node')).toHaveCount(count);
+  await expect(page.locator('.canvas-content.presentation-settling')).toHaveCount(0);
   await expect(page.locator('.canvas-content')).not.toHaveClass(/presentation-settling/);
 }
 async function collisionCount(page: Page, selector = '.board-node') {
@@ -87,7 +85,7 @@ test('legacy staircase is repaired once with readable sections, persistent visua
   await expect.poll(async () => (await stored(page)).board.nodes[2].x).toBe(before.nodes[2].x);
   await respond(page, { type: 'dsl_patch', summary: '按内容关系智能布局', ops: [], presentation: { layout: 'auto', plan: { description: '三个板块并列，便于比较。', root: { direction: 'row', children: before.groups.map(group => ({ groupId: group.id, direction: 'column' })) } } } });
   await page.getByRole('button', { name: '智能布局', exact: true }).click();
-  await expect(page.locator('.semantic-map-node')).toHaveCount(7);
+  await expect(page.locator('.spatial-reading-note')).toContainText('三个板块并列');
   await expect.poll(async () => (await stored(page)).board.nodes[2].x).not.toBe(before.nodes[2].x);
   await expect(page.getByRole('button', { name: '重做', exact: true })).toBeDisabled();
 });

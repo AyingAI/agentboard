@@ -3,7 +3,6 @@ import type { ActivityEntry, BoardDSL, BoardNode as BoardNodeType, VisualReferen
 import BoardNode from './BoardNode';
 import BoardOverview from './BoardOverview';
 import EmptyBoardWelcome from './EmptyBoardWelcome';
-import type { ExplorationKind } from '../data/exploration';
 import EmptyBoardWorking from './EmptyBoardWorking';
 import type { RenderedNodeSize } from '../presentation/layout';
 
@@ -64,15 +63,17 @@ interface BoardCanvasProps {
   onEdgeLabelDoubleClick: (edgeId: string) => void;
   onCommitEdgeLabel: (edgeId: string, value: string) => void;
   onCancelEdgeLabel: () => void;
-  onOpenDeepDive: (nodeId: string) => void;
   onCloseDeepDive: () => void;
   onDeepDiveInputChange: (value: string) => void;
   onSubmitDeepDive: () => void;
   onOpenAgentConfig: () => void;
+  onToggleTask?: (nodeId: string, nextBody: string) => void;
   onVisualStateChange: (nodeId: string, state: Record<string, unknown>) => void;
   onVisualReference: (reference: VisualReference) => void;
   onVisualAsk: (nodeId: string, text: string) => void;
-  onStartExploration: (kind: ExplorationKind, question: string, material?: string, example?: boolean) => void;
+  onSelectStarterPrompt: (prompt: string) => void;
+  onOpenShowcase: () => void;
+  renderOverlay?: (context: { nodeMap: Map<string, BoardNodeType>; canvasWidth: number; canvasHeight: number }) => React.ReactNode;
 }
 
 interface SelectionBox {
@@ -338,15 +339,17 @@ export default function BoardCanvas({
   onEdgeLabelDoubleClick,
   onCommitEdgeLabel,
   onCancelEdgeLabel,
-  onOpenDeepDive,
   onCloseDeepDive,
   onDeepDiveInputChange,
   onSubmitDeepDive,
   onOpenAgentConfig,
+  onToggleTask,
   onVisualStateChange,
   onVisualReference,
   onVisualAsk,
-  onStartExploration,
+  onSelectStarterPrompt,
+  onOpenShowcase,
+  renderOverlay,
 }: BoardCanvasProps) {
   const [nodeMeasurements, setNodeMeasurements] = useState<NodeMeasurements>(() => new Map());
   const [selectionBox, setSelectionBox] = useState<SelectionBox | null>(null);
@@ -403,7 +406,7 @@ export default function BoardCanvas({
     });
 
     return () => { observer.disconnect(); cancelAnimationFrame(frame); };
-  }, [board.nodes, boardRef, zoom, onNodesMeasured, sessionId]);
+  }, [board.nodes, board.metadata, boardRef, zoom, onNodesMeasured, sessionId]);
 
   const wheelHandler = useRef(onCanvasWheel);
   wheelHandler.current = onCanvasWheel;
@@ -411,7 +414,7 @@ export default function BoardCanvas({
     const canvas = boardRef.current;
     if (!canvas) return;
     const wheel = (event: WheelEvent) => {
-      if ((event.target as HTMLElement).closest('.visual-surface,textarea,input,select,.deep-dive-panel,.empty-board-welcome')) return;
+      if ((event.target as HTMLElement).closest('.visual-surface,textarea,input,select,.deep-dive-panel,.empty-board-welcome,.selection-toolbar')) return;
       wheelHandler.current(event);
     };
     canvas.addEventListener('wheel', wheel, { passive: false });
@@ -639,7 +642,7 @@ export default function BoardCanvas({
             editState={editState}
             onPointerDown={onPointerDown} onStartEdit={onStartEdit}
             onCommitEdit={onCommitEdit} onCancelEdit={onCancelEdit}
-            onOpenDeepDive={onOpenDeepDive}
+            onToggleTask={onToggleTask}
             onVisualStateChange={onVisualStateChange}
             onVisualReference={onVisualReference}
             onVisualAsk={onVisualAsk}
@@ -677,12 +680,18 @@ export default function BoardCanvas({
       </div>
 
       {!isSettling ? <BoardOverview board={board} nodes={nodeMap} zoom={zoom} panOffset={panOffset} onFocus={onFocusNodes} /> : null}
+      {!isSettling ? renderOverlay?.({
+        nodeMap,
+        canvasWidth: boardRef.current?.clientWidth ?? 0,
+        canvasHeight: boardRef.current?.clientHeight ?? 0,
+      }) : null}
 
       {board.nodes.length === 0 && (isAgentPending ? <EmptyBoardWorking activity={runningActivity} /> : (
         <EmptyBoardWelcome
           isAgentConfigured={isAgentConfigured}
           onOpenConfig={onOpenAgentConfig}
-          onStartExploration={onStartExploration}
+          onSelectPrompt={onSelectStarterPrompt}
+          onOpenShowcase={onOpenShowcase}
           onCreateCard={() => {
             const rect = boardRef.current?.getBoundingClientRect();
             if (!rect) return;

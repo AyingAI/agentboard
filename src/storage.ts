@@ -1,10 +1,9 @@
-import type { BoardDSL, BoardSession } from './types/dsl';
+import type { BoardBrief, BoardDSL, BoardSession } from './types/dsl';
 import type { AgentConfig } from './types/dsl';
+import { readBoardBrief, setBoardBrief } from './engine/boardBrief';
 import { validateBoard } from './engine/validation';
 import { boardVisualErrors } from './visuals/contract';
 import { applyVisualPatch } from './visuals/patch';
-import { normalizeJevConfig } from './agent/jevConfig';
-import { restoreCollaboration } from './agent/discoveries';
 import { emptyBoard, isDefaultBoardTitle } from './data/initialBoard';
 
 const SESSIONS_KEY = 'agentboard.sessions';
@@ -25,6 +24,32 @@ interface SessionsData {
 
 function validBoard(value: BoardDSL): boolean {
   return validateBoard(value).length === 0 && boardVisualErrors(value).length === 0;
+}
+
+function migrateLegacyBrief(session: BoardSession & { collaboration?: unknown }): void {
+  const raw = session.collaboration;
+  delete session.collaboration;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return;
+  const fields = raw as Record<string, unknown>;
+  const legacy: BoardBrief = {
+    goal: typeof fields.goal === 'string' ? fields.goal.trim() : undefined,
+    constraints: typeof fields.constraints === 'string' ? fields.constraints.trim() : undefined,
+  };
+  if (!legacy.goal && !legacy.constraints) return;
+
+  const migrateBoard = (board: BoardDSL) => {
+    const current = readBoardBrief(board);
+    return setBoardBrief(board, {
+      goal: current.goal ?? legacy.goal,
+      constraints: current.constraints ?? legacy.constraints,
+    });
+  };
+  session.board = migrateBoard(session.board);
+  // The legacy goal lived outside board history, so undoing an old edit must preserve it.
+  if (session.history) {
+    session.history.past = session.history.past.map(migrateBoard);
+    session.history.future = session.history.future.map(migrateBoard);
+  }
 }
 
 function readSessions(raw: string | null): SessionsData | null {
@@ -52,18 +77,18 @@ function readSessions(raw: string | null): SessionsData | null {
           if (proposal) {
             try {
               if (typeof proposal.id !== 'string' || typeof proposal.activityId !== 'string' || !validBoard(proposal.baseBoard) || !applyVisualPatch(proposal.baseBoard, proposal.patch).result.applied) delete run.pendingProposal;
-              if (typeof proposal.evidenceSourceId !== 'string') delete proposal.evidenceSourceId;
               if (typeof proposal.projectContext !== 'string') delete proposal.projectContext;
-              if (typeof proposal.evidenceNote !== 'string') delete proposal.evidenceNote;
-              if (Array.isArray(proposal.evidenceIssues)) proposal.evidenceIssues = proposal.evidenceIssues.filter(issue => issue && typeof issue.nodeId === 'string' && typeof issue.sourceTitle === 'string' && typeof issue.text === 'string');
-              else delete proposal.evidenceIssues;
+              const legacy = proposal as Record<string, unknown>;
+              delete legacy.evidenceSourceId;
+              delete legacy.evidenceNote;
+              delete legacy.evidenceIssues;
             } catch { delete run.pendingProposal; }
           }
           return [id, run];
         }));
       }
       if (typeof session.draft !== 'string') delete session.draft;
-      session.collaboration = restoreCollaboration(session.collaboration);
+      migrateLegacyBrief(session);
     }
     return { sessions: data.sessions, activeId: ids.has(data.activeId) ? data.activeId : data.sessions[0].id };
   } catch { return null; }
@@ -158,12 +183,22 @@ const DEFAULT_CONFIG: AgentConfig = {
   provider: 'local-cli',
 };
 
+function sanitizeAgentConfig(raw: AgentConfig): AgentConfig {
+  const config: AgentConfig = { provider: raw.provider };
+  if (typeof raw.apiKey === 'string') config.apiKey = raw.apiKey;
+  if (typeof raw.model === 'string') config.model = raw.model;
+  if (typeof raw.cliId === 'string') config.cliId = raw.cliId;
+  if (typeof raw.baseUrl === 'string') config.baseUrl = raw.baseUrl;
+  if (typeof raw.maxOutputTokens === 'number' && Number.isFinite(raw.maxOutputTokens)) config.maxOutputTokens = raw.maxOutputTokens;
+  return config;
+}
+
 export function loadAgentConfig(): AgentConfig {
   try {
     const raw = localStorage.getItem(CONFIG_KEY);
     if (!raw) return DEFAULT_CONFIG;
     const config = JSON.parse(raw) as AgentConfig;
-    const next = { ...config, jev: normalizeJevConfig(config.jev) };
+    const next = sanitizeAgentConfig(config);
     // Persist once; failure to save must not discard a usable connection.
     if (JSON.stringify(next) !== raw) { try { saveAgentConfig(next); } catch { /* Read-only storage. */ } }
     return next;
@@ -173,5 +208,5 @@ export function loadAgentConfig(): AgentConfig {
 }
 
 export function saveAgentConfig(config: AgentConfig): void {
-  localStorage.setItem(CONFIG_KEY, JSON.stringify({ ...config, jev: normalizeJevConfig(config.jev) }));
+  localStorage.setItem(CONFIG_KEY, JSON.stringify(sanitizeAgentConfig(config)));
 }

@@ -65,11 +65,12 @@ agentBridgePlugin.ts     # Vite 插件：本地 CLI 检测 + 代理执行
 - `src/presentation/layout.ts` 和 `useBoardPresentation` 按 DOM 实测尺寸处理避让，保留分组和无关对象的位置，几何修正与原 Agent 事务共享撤销；metadata["agentboard.presentation"] 保存原始内容最小高度，让后续缩短的内容能正常收缩。布局提示只放在 prompt 中，运行时不要因关键词擅自添加 layout 操作或扩大 scope。不要修改稳定 engine/patch.ts 或 engine/validation.ts。
 - `src/presentation/composition.ts` 负责新白板及用户主动整理时的板块排版：主视觉与旁注组合、小卡片行布局、分组打包、有向关系分层。同一 metadata 键下的 composition 保存版式、页宽和位置快照；人工拖动/改宽后停止全图自动重排。后续内容增长可顺延自动管理的板块，人工画布只移动本次新增/修改的对象。保留模型 HTML、状态与语义结构。显式空间布局在 presentation 层按实测尺寸调用既有布局引擎，不通过关键词增加操作。
 - DSLPatch 可选 `presentation: { layout: 'auto' | 'preserve' }` 由 dsl.ts 的 PRESENTATION_LAYOUTS 定义；preserve 允许任意有意义的模型空间坐标，只处理实测碰撞并记录 freePlacement，刷新不擅自压成网格；它不扩大修改范围或授予全图布局权限。类型、响应解析与 prompt schema 保持同步。
-- `presentation.plan`（SpatialPlan/SpatialItem）通过节点/分组引用和递归 row/column/orbit 表达内容关系；plan 只与 auto 配合，preserve 继续保留任意自定义坐标。`spatialPlan.ts` 校验引用、作用范围与来源，`semanticLayout.ts` 将同一空间方案分别用于完整内容尺寸与紧凑结构视图。不要把结构视图的 300px 摘要卡片尺寸写回原节点，也不修改模型 HTML。
+- `presentation.plan`（SpatialPlan/SpatialItem）通过节点/分组引用和递归 row/column/orbit 表达内容关系；plan 只与 auto 配合，preserve 继续保留任意自定义坐标。`spatialPlan.ts` 校验引用、作用范围与来源，`semanticLayout.ts` 将同一空间方案用于统一交互画布的实测尺寸布局。不要把结构视图单独割裂成只读页面，也不修改模型 HTML。
 - “智能布局”复用当前 Agent 的运行、停止、重试与真实进度，taskPolicy.layoutOnly 明确只允许 ops: [] + plan；拒绝增删改内容，保护等待期间的人类编辑。新生成可在同一轮提供方案；复杂新板无方案时用显式分组/连线/标签提供本地后备，并标明来源。全图空间计划不能绕过 allowFullBoardLayout 或 selection scope。
-- `SemanticMap` 是独立呈现视图；MapNodeDetail 运行原 VisualSurface，状态、引用、讨论保持原协议。完整视图继续支持拖动和编辑；显式 preserve/布局算法应清除过期空间计划。空间几何修正与 Agent 事务共享撤销，视图切换不新增内容事务。
-- 新消息会带上近期用户事件与 Agent 摘要；不要恢复每轮最多 3 个操作、固定卡片数量或强制组件模板等表达限制。
-- `npm run test:e2e` 验证真实浏览器交互；显式设置 `AGENTBOARD_LIVE_CLI=codex` 可运行真实 CLI 测试，它使用模型配额。示例内容明确标注来源，不冒充实时模型调用。
+- 统一交互画布直接承载全部编辑、拖拽、连线、`SelectionToolbar` 上下文共创、`CardMarkdown` 富文本与可勾选清单、`BoardBriefPopover` 持久目标以及 `DeliverableModal` 全白板 Markdown 导出；显式 preserve/布局算法应清除过期空间计划。空间几何修正与 Agent 事务共享撤销。
+- 新消息会带上近期用户事件、白板持久目标/约束（`boardBrief.ts`）与 Agent 摘要；不要恢复每轮最多 3 个操作、固定卡片数量或强制组件模板等表达限制。
+- 保持单画布体验与克制架构：不再保留第三方 JEV/TypeSafe 核查链路、后台定时主动轮询守护进程或单独的“探索模式”双轨工具栏；CLI 优先顺位由 `onboarding.ts` 统一管理（`claude -> codex -> gemini -> antigravity -> pi`）。
+- `npm run test:e2e` 验证真实浏览器交互；显式设置 `AGENTBOARD_LIVE_CLI=codex` 可运行真实 CLI 测试，它使用模型配额。示例内容（`showcaseBoard.ts` / `public/examples/`）明确标注来源，不冒充实时模型调用。
 
 ### DSL 模型
 

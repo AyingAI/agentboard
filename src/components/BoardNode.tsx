@@ -1,6 +1,7 @@
+import { useLayoutEffect, useRef } from 'react';
 import type { BoardNode as BoardNodeType, VisualReference } from '../types/dsl';
 import VisualSurface from './VisualSurface';
-import { CardMaterial } from './Exploration';
+import CardMarkdown from './CardMarkdown';
 
 interface EditState {
   nodeId: string;
@@ -18,7 +19,7 @@ interface BoardNodeProps {
   onCommitEdit: (nodeId: string, field: 'title' | 'body', value: string) => void;
   onCancelEdit: () => void;
   onConnectStart: (nodeId: string, side: 'top' | 'right' | 'bottom' | 'left') => void;
-  onOpenDeepDive: (nodeId: string) => void;
+  onToggleTask?: (nodeId: string, nextBody: string) => void;
   onVisualStateChange: (nodeId: string, state: Record<string, unknown>) => void;
   onVisualReference: (reference: VisualReference) => void;
   onVisualAsk: (nodeId: string, text: string) => void;
@@ -61,13 +62,22 @@ export default function BoardNode({
   onCommitEdit,
   onCancelEdit,
   onConnectStart,
-  onOpenDeepDive,
+  onToggleTask,
   onVisualStateChange,
   onVisualReference,
   onVisualAsk,
 }: BoardNodeProps) {
   const isEditing = editState?.nodeId === node.id;
   const editingField = editState?.field;
+  const bodyTextareaRef = useRef<HTMLTextAreaElement>(null);
+
+  useLayoutEffect(() => {
+    if (!isEditing || editingField !== 'body') return;
+    const el = bodyTextareaRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(360, Math.max(88, el.scrollHeight))}px`;
+  }, [isEditing, editingField, node.id]);
   const semanticTag = node.tags?.find((tag) => TAG_LABELS[tag]) ?? null;
   const tagClasses = node.tags?.map(tagClassName).join(' ') ?? '';
   const kicker = semanticTag
@@ -99,24 +109,6 @@ export default function BoardNode({
         {kicker}
       </div>
 
-      {isPrimarySelected && !isEditing ? (
-        <button
-          type="button"
-          className="node-deep-dive-button"
-          title="围绕这个节点深挖"
-          aria-label="围绕这个节点深挖"
-          onPointerDown={(event) => {
-            event.stopPropagation();
-          }}
-          onClick={(event) => {
-            event.stopPropagation();
-            onOpenDeepDive(node.id);
-          }}
-        >
-          深
-        </button>
-      ) : null}
-
       {isEditing && editingField === 'title' ? (
         <input
           className="inline-edit title-inline"
@@ -136,17 +128,30 @@ export default function BoardNode({
 
       {isEditing && editingField === 'body' ? (
         <textarea
+          ref={bodyTextareaRef}
           className="inline-edit body-inline"
           defaultValue={node.body}
           autoFocus
           rows={3}
+          onInput={(e) => {
+            e.currentTarget.style.height = 'auto';
+            e.currentTarget.style.height = `${Math.min(360, Math.max(88, e.currentTarget.scrollHeight))}px`;
+          }}
           onBlur={(e) => onCommitEdit(node.id, 'body', e.currentTarget.value)}
           onKeyDown={(e) => {
+            if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+              e.preventDefault();
+              onCommitEdit(node.id, 'body', e.currentTarget.value);
+            }
             if (e.key === 'Escape') onCancelEdit();
           }}
         />
       ) : (
-        <CardMaterial body={node.body} onDoubleClick={e => { e.stopPropagation(); onStartEdit(node.id, 'body'); }} />
+        <CardMarkdown
+          body={node.body}
+          onDoubleClick={e => { e.stopPropagation(); onStartEdit(node.id, 'body'); }}
+          onToggleTask={onToggleTask ? nextBody => onToggleTask(node.id, nextBody) : undefined}
+        />
       )}
 
       {node.visual ? <VisualSurface nodeId={node.id} title={node.title} visual={node.visual}

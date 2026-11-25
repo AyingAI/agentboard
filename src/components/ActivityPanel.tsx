@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useState } from 'react';
 import type { ActivityEntry, ActivityProgressStep, AgentAction } from '../types/dsl';
 import type { InteractionDecision } from '../hooks/useAgent';
 import { followUpActions } from '../agent/followUpActions';
@@ -36,9 +36,8 @@ interface ActivityPanelProps {
   expandedId: string | null;
   onToggleExpand: (id: string | null) => void;
   onRespondToInteraction: (runId: string, decision: InteractionDecision, activityId: string) => void;
-  view: ActivityView | 'discoveries';
+  view: ActivityView;
   onViewChange: (view: ActivityPanelProps['view']) => void;
-  discoveries?: ReactNode;
 }
 
 export default function ActivityPanel({
@@ -49,24 +48,17 @@ export default function ActivityPanel({
   expandedId,
   onToggleExpand,
   onRespondToInteraction,
-  view: requestedView,
+  view,
   onViewChange,
-  discoveries,
 }: ActivityPanelProps) {
-  const view = requestedView === 'discoveries' && !discoveries ? 'collaboration' : requestedView;
-  const suggestionsTab = useRef<HTMLButtonElement>(null);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [copyFailedId, setCopyFailedId] = useState<string | null>(null);
   const [now, setNow] = useState(Date.now());
   const hasRunning = activities.some(item => item.kind === 'run_progress' && item.progressStatus === 'running');
-  const visibleActivities = view === 'discoveries' ? [] : activitiesForView(activities, view);
+  const visibleActivities = activitiesForView(activities, view);
   const collaborationCount = activitiesForView(activities, 'collaboration').length;
   const diagnosticCount = activitiesForView(activities, 'diagnostics').length;
-
-  useEffect(() => {
-    if (view === 'discoveries' && document.activeElement === document.body) suggestionsTab.current?.focus();
-  }, [view]);
 
   useEffect(() => {
     if (!hasRunning) return;
@@ -99,13 +91,13 @@ export default function ActivityPanel({
       <div className="activity-header">
         <div>
           <h1>Agent 历史</h1>
-          <p>{view === 'collaboration' ? '需求、确认和白板变更' : view === 'diagnostics' ? '调用、校验和错误详情' : '根据白板内容准备的建议'}</p>
+          <p>{view === 'collaboration' ? '需求、确认和白板变更' : '调用、校验和错误详情'}</p>
         </div>
         <button type="button" className="ghost small" onClick={onClose} title="关闭活动面板" aria-label="关闭活动面板">
           ✕
         </button>
       </div>
-      <div className={`activity-filter${discoveries ? ' with-discoveries' : ''}`} role="tablist" aria-label="Agent 历史视图">
+      <div className="activity-filter" role="tablist" aria-label="Agent 历史视图">
         <button
           type="button"
           role="tab"
@@ -115,8 +107,6 @@ export default function ActivityPanel({
         >
           协作记录{collaborationCount > 0 ? ` ${collaborationCount}` : ''}
         </button>
-        {discoveries ? <button ref={suggestionsTab} type="button" role="tab" aria-selected={view === 'discoveries'}
-          className={view === 'discoveries' ? 'active' : ''} onClick={() => onViewChange('discoveries')}>Agent 建议</button> : null}
         <button
           type="button"
           role="tab"
@@ -127,7 +117,7 @@ export default function ActivityPanel({
           运行日志{diagnosticCount > 0 ? ` ${diagnosticCount}` : ''}
         </button>
       </div>
-      {view === 'discoveries' ? discoveries : <div className="activity-list">
+      <div className="activity-list">
         {visibleActivities.length === 0 ? (
           <div className="activity-empty">
             {view === 'collaboration'
@@ -247,7 +237,7 @@ export default function ActivityPanel({
             </section>
           );
         })}
-      </div>}
+      </div>
     </aside>
   );
 }

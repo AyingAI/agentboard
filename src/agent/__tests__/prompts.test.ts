@@ -257,6 +257,21 @@ describe('buildUserMessage', () => {
     expect(msg).not.toContain('Context packet (delta)');
   });
 
+  it('includes the complete body of an untouched card for an explicit whole-board action', () => {
+    const board = makeBoard(2);
+    board.nodes[1].body = 'Background. '.repeat(70) + 'Evidence at the end of the note.';
+    const message = buildUserMessage(board, '请审视整张白板的盲点', {
+      taskPolicy: {
+        scope: 'board', selectedNodeIds: [], allowExistingEdits: true, allowDelete: false,
+        allowFullBoardLayout: false, includeFullBoard: true,
+      },
+      recentEditEvents: [{ id: 'edit_1', type: 'node_updated', timestamp: 123, nodeId: 'n0', summary: '更新节点标题' }],
+    });
+
+    expect(message).not.toContain('Context packet (delta)');
+    expect(extractJsonBlock(message)).toEqual(board);
+  });
+
   it('should not leak unchanged node bodies into the delta board summary', () => {
     const board = makeBoard(2);
     board.nodes[1] = {

@@ -5,11 +5,10 @@ import { createCliRegistry, discoverClis, publicCliInfo, type CliRegistry, type 
 import type { ChildProcessWithoutNullStreams } from 'child_process';
 import type { IncomingMessage, ServerResponse } from 'http';
 import { findAgentResponseJson } from './src/agent/response';
-import { readCliEvent, type CliOutputState } from './src/server/cliEvents';
+import { cliFailure, readCliEvent, type CliOutputState } from './src/server/cliEvents';
 import { draftTitles } from './src/agent/liveProgress';
 import type { AgentProgressEvent } from './src/types/dsl';
-import type { AgentError, LocalCliPurpose } from './src/agent/types';
-import { discoveryCliArgs, findDiscoveryJson } from './src/server/discoveryCli';
+import type { AgentError } from './src/agent/types';
 import { isLocalRequest, LocalRequestError, readLocalJson, sendLocalJson } from './src/server/localApi';
 
 const CLI_TIMEOUT_MS = 600_000;
@@ -90,16 +89,13 @@ function runCLIStream(
   userMessage: string,
   res: ServerResponse,
   run: StoredRun,
-  purpose?: LocalCliPurpose,
 ): Promise<string> {
   const fullPrompt = `${systemPrompt}\n\n---\n\n${userMessage}`;
   const spec = getCliSpec(cli.id);
   if (!spec || !cli.path) return Promise.reject(new Error(`CLI "${cli.name}" is not available`));
   const usesEvents = ['claude', 'pi', 'codex'].includes(spec.id);
-  const restrictedArgs = purpose ? discoveryCliArgs(cli.id) : null;
-  if (purpose && !restrictedArgs) return Promise.reject(new Error('此 CLI 暂不支持后台分析，请选用 Codex、Claude Code、Pi 或 API；手动讨论仍可正常使用。'));
-  const args = restrictedArgs ?? (spec.promptMode === 'argument' ? [...spec.args, fullPrompt] : spec.args);
-  const findResponse = purpose === 'discovery' ? findDiscoveryJson : findAgentResponseJson;
+  const args = spec.promptMode === 'argument' ? [...spec.args, fullPrompt] : spec.args;
+  const findResponse = findAgentResponseJson;
 
   return new Promise((resolve, reject) => {
     const startedAt = Date.now();
@@ -132,7 +128,7 @@ function runCLIStream(
 
     writeStreamEvent(res, {
       type: 'progress',
-      event: { type: 'connected', message: `已连接 ${spec.name}${cli.version ? ` · ${cli.version}` : ''}，正在启动执行`, detail: cli.path },
+      event: { type: 'connected', message: `已连接 ${spec.name}${cli.version ? ` · ${cli.version}` : ''}，正在启动执行` },
     });
 
     const heartbeat = setInterval(() => {
@@ -169,7 +165,7 @@ function runCLIStream(
       finish(() => {
         writeStreamEvent(res, {
           type: 'progress',
-          event: { type: 'working', message: purpose === 'discovery' ? '发现已准备好' : '已获得结构化结果，正在应用到白板' },
+          event: { type: 'working', message: '已获得结构化结果，正在应用到白板' },
         });
         child.kill('SIGTERM');
         resolve(responseJson);
@@ -224,8 +220,13 @@ function runCLIStream(
       stderr = `${stderr}${chunk}`.slice(-4000);
     });
 
-    child.on('error', (error) => finish(() => reject(error)));
-    child.on('close', (code, signal) => {
+    const rejectCliError = (raw: unknown) => {
+      const failure = cliFailure(raw);
+      finish(() => reject(Object.assign(new Error(failure.message), failure)));
+    };
+
+    child.on('error', error => rejectCliError(error.message));
+    child.on('close', code => {
       if (stdoutBuffer.trim() && usesEvents) consumeLine(stdoutBuffer);
       if (state.failure) {
         finish(() => reject(Object.assign(new Error(state.failure!.message), state.failure)));
@@ -240,11 +241,10 @@ function runCLIStream(
         finish(() => reject(Object.assign(new Error('Agent 已结束但没有返回可交付内容，原始请求已保留。'), { code: 'PARSE_ERROR', retryable: false })));
         return;
       }
-      const detail = stderr.trim() || `CLI exited with code ${code ?? 'unknown'}${signal ? ` (${signal})` : ''}`;
-      finish(() => reject(new Error(detail)));
+      rejectCliError(stderr);
     });
 
-    child.stdin.on('error', (error) => finish(() => reject(error)));
+    child.stdin.on('error', error => rejectCliError(error.message));
     if (spec.promptMode === 'stdin') {
       child.stdin.end(fullPrompt);
     } else {
@@ -317,7 +317,7 @@ async function handleRun(req: IncomingMessage, res: ServerResponse, registry: Cl
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.flushHeaders();
 
-    const text = await runCLIStream(requestId, cli, systemPrompt, userMessage, res, run, parsed.purpose === 'discovery' || parsed.purpose === 'evidence-repair' ? parsed.purpose : undefined);
+    const text = await runCLIStream(requestId, cli, systemPrompt, userMessage, res, run);
     if (run.status === 'cancelled') { res.end(); return; }
     run.status = 'completed';
     run.text = text;

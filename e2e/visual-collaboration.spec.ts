@@ -39,12 +39,11 @@ async function submit(page: Page, text: string) {
   await page.locator('.prompt-bar textarea').press('Enter');
 }
 
-test('first screen offers two clear starts without unrelated demos', async ({ page }) => {
+test('first screen offers starter prompts, zero-config interactive showcase and free start', async ({ page }) => {
   await start(page, []);
-  await expect(page.getByRole('heading', { name: '今天想弄清楚什么？' })).toBeVisible();
-  await expect(page.getByRole('button', { name: /研究一个选题/ })).toBeVisible();
-  await expect(page.getByRole('button', { name: /策划一次活动或旅行/ })).toBeVisible();
-  await expect(page.getByRole('button', { name: /交互示例|看懂一个系统/ })).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: '和 AI 在同一张画布上思考' })).toBeVisible();
+  await expect(page.locator('.welcome-starter-card')).toHaveCount(4);
+  await expect(page.getByRole('button', { name: /免配置体验/ })).toBeVisible();
   await expect(page.getByRole('button', { name: '自由开始，先记一条想法' })).toBeVisible();
   await expect(page.getByRole('button', { name: '智能布局', exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: '自由开始，先记一条想法' }).click();

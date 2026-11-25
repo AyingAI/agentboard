@@ -2,16 +2,10 @@ import type { AgentAdapter, AgentConfig, AgentError, AgentRequest } from './type
 import { buildSystemPrompt, buildUserMessage } from './prompts';
 import { fallbackInteractionFromText, parseAgentResponse } from './response';
 import { readApiStream } from './apiStream';
+import { apiFetchOptions, INVALID_API_BASE_URL, normalizeApiBaseUrl } from './apiEndpoint';
 import { DEFAULT_TIMEOUT_MS, mapAbortError, withTimeout } from './resilience';
 
-const DEFAULT_ANTHROPIC_BASE_URL = 'https://api.anthropic.com/v1';
 const ANTHROPIC_VERSION = '2023-06-01';
-
-function normalizeClaudeBaseUrl(rawUrl: string | undefined) {
-  const value = (rawUrl || DEFAULT_ANTHROPIC_BASE_URL).trim().replace(/\/+$/, '');
-  if (/\/v\d+$/i.test(value)) return value;
-  return `${value}/v1`;
-}
 
 /** Claude API adapter via browser fetch */
 export class ClaudeAgentAdapter implements AgentAdapter {
@@ -29,6 +23,8 @@ export class ClaudeAgentAdapter implements AgentAdapter {
       } satisfies AgentError;
     }
 
+    const baseUrl = normalizeApiBaseUrl('claude', this.config.baseUrl);
+    if (!baseUrl) throw { code: 'API_ERROR', message: INVALID_API_BASE_URL, retryable: false } satisfies AgentError;
     const systemPrompt = buildSystemPrompt();
     const userMessage = buildUserMessage(request.boardState, request.userMessage, {
       runId: request.runId,
@@ -38,10 +34,10 @@ export class ClaudeAgentAdapter implements AgentAdapter {
     });
 
     let response: Response;
-    const apiUrl = `${normalizeClaudeBaseUrl(this.config.baseUrl)}/messages`;
     const { signal, cleanup } = withTimeout(request.signal, DEFAULT_TIMEOUT_MS);
     try {
-      response = await fetch(apiUrl, {
+      response = await fetch(`${baseUrl}/messages`, {
+        ...apiFetchOptions,
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -77,15 +73,9 @@ export class ClaudeAgentAdapter implements AgentAdapter {
           message: '请求过于频繁，请稍后重试。',
         } satisfies AgentError;
       }
-      // 4xx or 5xx
-      let detail = '';
-      try {
-        const body = await response.json();
-        detail = JSON.stringify(body);
-      } catch { /* ignore */ }
       throw {
         code: 'API_ERROR',
-        message: `API 返回错误 (${status})${detail ? ': ' + detail : ''}`,
+        message: `API 返回错误 (${status})`,
       } satisfies AgentError;
     }
 
@@ -103,8 +93,7 @@ export class ClaudeAgentAdapter implements AgentAdapter {
       if (signal.aborted) throw mapAbortError(signal, '生成已中断');
       throw {
         code: 'PARSE_ERROR',
-        message: err instanceof Error ? err.message : '无法解析 API 响应结构。',
-        rawText: String(err),
+        message: err instanceof Error && !(err instanceof SyntaxError) ? err.message : '无法解析 API 响应结构。',
       } satisfies AgentError;
     } finally {
       cleanup();
@@ -112,13 +101,12 @@ export class ClaudeAgentAdapter implements AgentAdapter {
 
     try {
       return parseAgentResponse(text);
-    } catch (err) {
+    } catch {
       const interaction = fallbackInteractionFromText(text, request.runId ?? `run_${Date.now()}`);
       if (interaction) return interaction;
       throw {
         code: 'PARSE_ERROR',
-        message: `Agent 返回的内容不是合法的 AgentBoard 响应 JSON：${err instanceof Error ? err.message : String(err)}`,
-        rawText: text.slice(0, 2000),
+        message: 'Agent 返回的内容不是合法的 AgentBoard 响应 JSON。',
       } satisfies AgentError;
     }
   }

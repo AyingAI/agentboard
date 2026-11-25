@@ -4,10 +4,10 @@ import type { AgentAdapter, AgentError } from '../agent/types';
 import { ClaudeAgentAdapter } from '../agent/claudeAgent';
 import { fetchCLIs, LocalCliAdapter } from '../agent/localCliAgent';
 import { OpenAIAgentAdapter } from '../agent/openaiAgent';
+import { apiFetchOptions, DEFAULT_API_BASE_URL, INVALID_API_BASE_URL, normalizeApiBaseUrl } from '../agent/apiEndpoint';
 import { applyPatch } from '../engine/patch';
 import SettingsSelect from './SettingsSelect';
 import './settings.css';
-import JevSettings from './JevSettings';
 import { availableClis as detectedClis, recommendedCli } from '../agent/onboarding';
 
 type ModelOption = {
@@ -23,7 +23,6 @@ interface AgentConfigPanelProps {
   onSetCliId: (cliId: string) => void;
   onSetBaseUrl: (url: string) => void;
   onSetMaxOutputTokens: (value: number) => void;
-  onSetJev: (value: AgentConfig['jev']) => void;
   onClose: () => void;
 }
 
@@ -39,9 +38,6 @@ const OPENAI_MODELS = [
   { value: 'gpt-4-turbo', label: 'GPT-4 Turbo' },
   { value: 'o1', label: 'o1' },
 ];
-
-const DEFAULT_CLAUDE_BASE_URL = 'https://api.anthropic.com/v1';
-const DEFAULT_OPENAI_BASE_URL = 'https://api.openai.com/v1';
 
 type TestState =
   | { status: 'idle'; message: string; detail?: string }
@@ -88,15 +84,8 @@ function createAdapter(config: AgentConfig): AgentAdapter | null {
   return null;
 }
 
-function normalizeApiBaseUrl(rawUrl: string | undefined, defaultUrl: string) {
-  const value = (rawUrl || defaultUrl).trim().replace(/\/+$/, '');
-  if (/\/v\d+$/i.test(value)) return value;
-  return `${value}/v1`;
-}
-
 function modelSourceKey(provider: AgentProvider, baseUrl: string | undefined) {
-  if (provider === 'claude') return `${provider}:${normalizeApiBaseUrl(baseUrl, DEFAULT_CLAUDE_BASE_URL)}`;
-  if (provider === 'openai') return `${provider}:${normalizeApiBaseUrl(baseUrl, DEFAULT_OPENAI_BASE_URL)}`;
+  if (provider === 'claude' || provider === 'openai') return `${provider}:${normalizeApiBaseUrl(provider, baseUrl) ?? ''}`;
   return provider;
 }
 
@@ -136,7 +125,6 @@ export default function AgentConfigPanel({
   onSetCliId,
   onSetBaseUrl,
   onSetMaxOutputTokens,
-  onSetJev,
   onClose,
 }: AgentConfigPanelProps) {
   const [clis, setClis] = useState<LocalCliInfo[]>([]);
@@ -181,7 +169,9 @@ export default function AgentConfigPanel({
   const cliOptions = availableClis.map(cli => ({
     value: cli.id, label: cli.name,
     badge: cli.version?.match(/\d+\.\d+\.\d+(?:-[\da-zA-Z.-]+)?/)?.[0],
-    description: cli.id === 'pi' ? '推荐 · 沿用本机登录与配置' : (cli.installations?.length ?? 0) > 1 ? `发现 ${cli.installations!.length} 份安装 · ${cli.version ? '已选择可识别的较新版本' : '按终端路径选择'}` : '沿用本机登录与配置',
+    description: (cli.installations?.length ?? 0) > 1
+      ? `发现 ${cli.installations!.length} 份安装 · ${cli.version ? '已选择可识别的较新版本' : '按终端路径选择'}`
+      : '自动复用本机登录与工具配置',
   }));
   if (config.cliId && !selectedCli && !loadingClis) cliOptions.unshift({ value: config.cliId, label: `${config.cliId} · 当前未找到`, badge: undefined, description: '请重新检测或选择其他工具' });
   const currentModelSourceKey = modelSourceKey(config.provider, config.baseUrl);
@@ -263,9 +253,11 @@ export default function AgentConfigPanel({
       return;
     }
 
-    const baseUrl = config.provider === 'claude'
-      ? normalizeApiBaseUrl(config.baseUrl, DEFAULT_CLAUDE_BASE_URL)
-      : normalizeApiBaseUrl(config.baseUrl, DEFAULT_OPENAI_BASE_URL);
+    const baseUrl = normalizeApiBaseUrl(config.provider, config.baseUrl);
+    if (!baseUrl) {
+      setModelFetchState({ status: 'error', message: INVALID_API_BASE_URL });
+      return;
+    }
     const endpoint = `${baseUrl}/models`;
     const headers: Record<string, string> = config.provider === 'claude'
       ? {
@@ -278,7 +270,7 @@ export default function AgentConfigPanel({
 
     setModelFetchState({ status: 'running', message: '正在获取模型列表…' });
     try {
-      const response = await fetch(endpoint, { headers });
+      const response = await fetch(endpoint, { ...apiFetchOptions, headers });
       if (!response.ok) {
         setModelFetchState({ status: 'error', message: `获取失败：API 返回 ${response.status}。` });
         return;
@@ -330,9 +322,9 @@ export default function AgentConfigPanel({
         </label>
 
         <section className={`provider-recommendation ${config.provider === 'local-cli' ? 'selected' : ''}`}>
-          <strong>{config.provider === 'local-cli' ? '优先推荐 Pi，也可使用已有的 Agent' : '使用你选择的模型服务'}</strong>
+          <strong>{config.provider === 'local-cli' ? '自动复用本机已登录的 CLI 工具' : '使用你选择的模型服务'}</strong>
           <p>
-            {config.provider === 'local-cli' ? '选择已安装并登录的工具即可开始；会保留你已选的 Agent。' : '填写服务地址与密钥，即可使用所选模型。'}
+            {config.provider === 'local-cli' ? '选择已安装并登录的工具（如 Claude Code、Codex、Gemini 等）即可开始。' : '填写服务地址与密钥，即可使用所选模型。'}
           </p>
         </section>
 
@@ -353,7 +345,7 @@ export default function AgentConfigPanel({
             </details> : null}
             {!loadingClis && !cliError && availableClis.length === 0 && (
               <span className="config-hint">
-                未检测到本地 Agent。可先安装并登录 Pi，再点击“重新检测”；也可以在上方切换到 API。
+                未检测到本地 Agent。可先安装并登录 Claude Code、Codex 等 CLI，再点击“重新检测”；也可以在上方切换到 API。
               </span>
             )}
           </div>
@@ -370,7 +362,8 @@ export default function AgentConfigPanel({
               <span>Base URL</span>
               <input type="text" value={config.baseUrl || ''}
                 onChange={(e) => onSetBaseUrl(e.target.value)}
-                placeholder={DEFAULT_CLAUDE_BASE_URL} />
+                placeholder={DEFAULT_API_BASE_URL.claude} />
+              <span className="config-hint">修改地址后需要重新填写 API Key。</span>
             </label>
             <div className="config-field">
               <div className="config-field-heading">
@@ -403,9 +396,9 @@ export default function AgentConfigPanel({
               <span>Base URL</span>
               <input type="text" value={config.baseUrl || ''}
                 onChange={(e) => onSetBaseUrl(e.target.value)}
-                placeholder={DEFAULT_OPENAI_BASE_URL} />
+                placeholder={DEFAULT_API_BASE_URL.openai} />
               <span className="config-hint">
-                支持任何 OpenAI 兼容 API，如 Ollama、LM Studio、DeepSeek 等。
+                支持 Ollama、LM Studio、DeepSeek 等兼容 API。修改地址后需要重新填写 API Key。
               </span>
             </label>
             <div className="config-field">
@@ -438,7 +431,6 @@ export default function AgentConfigPanel({
             <span className="config-hint">复杂交互视觉需要更多输出空间，请按所选模型支持的上限调整。</span>
           </details>
         </> : null}
-        <JevSettings value={config.jev} onChange={onSetJev} />
         <p className="config-note">
           {config.provider === 'local-cli'
             ? '通过本地 CLI 调用 Agent，复用已有配置和认证。'

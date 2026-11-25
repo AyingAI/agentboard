@@ -71,6 +71,46 @@ test('older combined offers become separate direct actions', async ({ page }) =>
   expect(requests[1].userMessage).not.toContain('请执行这一步：把记分卡改成');
 });
 
+for (const width of [1280, 390]) {
+  test(`canvas menus open above the canvas without changing its layout at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 760 });
+    await start(page, [textNode('one')]);
+    const layout = page.getByRole('button', { name: '更多布局操作' });
+    const insights = page.getByRole('button', { name: /AI 洞察/ });
+    const header = page.locator('.canvas-header');
+    const toolbar = page.locator('.canvas-toolbar');
+    const canvas = page.locator('.board-canvas');
+    await expect(insights).toBeEnabled();
+    const bounds = await Promise.all([header.boundingBox(), toolbar.boundingBox(), canvas.boundingBox()]);
+
+    await layout.click();
+    const layoutMenu = page.getByRole('menu', { name: '更多布局操作' });
+    await expect(layoutMenu.getByRole('menuitem', { name: /仅整理间距/ })).toBeFocused();
+    expect(await Promise.all([header.boundingBox(), toolbar.boundingBox(), canvas.boundingBox()])).toEqual(bounds);
+
+    await insights.click();
+    const insightMenu = page.getByRole('menu', { name: 'AI 洞察' });
+    await expect(layoutMenu).toHaveCount(0);
+    await expect(insightMenu.getByRole('menuitem')).toHaveCount(3);
+    expect(await Promise.all([header.boundingBox(), toolbar.boundingBox(), canvas.boundingBox()])).toEqual(bounds);
+    const menuBounds = (await insightMenu.boundingBox())!;
+    const triggerBounds = (await insights.boundingBox())!;
+    expect(menuBounds.y).toBeGreaterThan(triggerBounds.y + triggerBounds.height);
+    expect(menuBounds.x).toBeGreaterThanOrEqual(0);
+    expect(menuBounds.x + menuBounds.width).toBeLessThanOrEqual(width);
+
+    await page.keyboard.press('ArrowDown');
+    await expect(insightMenu.getByRole('menuitem', { name: /提炼核心结论/ })).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(insightMenu).toHaveCount(0);
+    await expect(insights).toBeFocused();
+
+    await layout.click();
+    await layoutMenu.getByRole('menuitem', { name: /仅整理间距/ }).click();
+    await expect(layoutMenu).toHaveCount(0);
+  });
+}
+
 test('rendered content and group bounds never overlap, overview fits and navigation restores readable scale', async ({ page }) => {
   const longTitle = '实测记分卡 · 记录每次对比的原始数据和观察过程，再决定哪些调整值得进入下一轮验证';
   const nodes = Array.from({ length: 14 }, (_, index) => ({ ...textNode(`n${index}`, 80 + index % 3 * 350, 80 + Math.floor(index / 3) * 200, ('观察真实行为，记录证据并继续验证。\n').repeat(index % 3 === 0 ? 18 : 8)), title: ['理解问题', '确定假设', '收集证据', '展开方案', '比较方向', '找到取舍', '设计实验', '真实反馈', '调整目标', '验证结果', '复盘判断', '下一步行动', '长期记录', longTitle][index] }));
@@ -78,9 +118,8 @@ test('rendered content and group bounds never overlap, overview fits and navigat
   const ops = [...nodes.map(node => ({ op: 'add_node', node })), ...groups.map(group => ({ op: 'add_group', group }))];
   await answer(page, patch(ops, { actions: [{ id: 'compare', label: '继续比较关键方向', prompt: '基于当前证据比较关键方向。' }] }));
   await start(page); await submit(page, '展开产品方向');
-  await expect(page.locator('.semantic-map-node')).toHaveCount(14);
-  await page.getByRole('button', { name: '内容', exact: true }).click();
   await expect(page.locator('.board-node')).toHaveCount(14);
+  await expect(page.locator('.canvas-content')).not.toHaveClass(/presentation-settling/);
   await expect.poll(() => overlapCount(page)).toBe(0);
   await expect.poll(async () => Number((await page.locator('.canvas-zoom-value').innerText()).replace('%', ''))).toBeGreaterThanOrEqual(80);
   await dockIsClear(page);

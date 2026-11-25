@@ -5,8 +5,16 @@ export interface AvailableCli {
   version?: string;
 }
 
+const CLI_PRIORITY: Record<string, number> = {
+  claude: 0,
+  codex: 1,
+  gemini: 2,
+  antigravity: 3,
+  pi: 4,
+};
+
 export function availableClis<T extends AvailableCli>(clis: T[]): T[] {
-  const priority = (id: string) => id === 'pi' ? 0 : id === 'codex' ? 1 : 2;
+  const priority = (id: string) => CLI_PRIORITY[id] ?? 5;
   return clis.filter((cli) => cli.available).sort((a, b) => priority(a.id) - priority(b.id));
 }
 

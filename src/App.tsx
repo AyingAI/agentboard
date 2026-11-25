@@ -1,8 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { BoardDSL, BoardEditEvent, BoardNode, AgentAction, AgentTaskPolicy, DSLPatch, Discovery, VisualReference } from './types/dsl';
-import { useProactiveCollaboration } from './hooks/useProactiveCollaboration';
-import CollaborationPanel from './components/CollaborationPanel';
-import { EMPTY_COLLABORATION, discoveryDecision, impactProjectContext, isDiscoveryCurrent, projectGoal, semanticPrint, nodePrints } from './agent/discoveries';
+import type { BoardDSL, BoardEditEvent, BoardNode, AgentAction, AgentTaskPolicy, DSLPatch, VisualReference } from './types/dsl';
+import { SEMANTIC_NODE_TAGS } from './types/dsl';
 import { useBoardSessions } from './hooks/useBoardSessions';
 import { useAgent } from './hooks/useAgent';
 import { useAgentConfig } from './hooks/useAgentConfig';
@@ -12,11 +10,12 @@ import { useDismissibleLayer } from './hooks/useDismissibleLayer';
 import { useBoardPresentation } from './hooks/useBoardPresentation';
 import CanvasNavigator from './components/CanvasNavigator';
 import SectionNavigator from './components/SectionNavigator';
-import { composeMeasuredBoard, hasManagedComposition } from './presentation/composition';
+import SelectionToolbar, { type SemanticRoleOption } from './components/SelectionToolbar';
+import BoardBriefPopover from './components/BoardBriefPopover';
+import DeliverableModal from './components/DeliverableModal';
+import { composeMeasuredBoard } from './presentation/composition';
 import { arrangeMeasuredBoard } from './presentation/layout';
 import { inferSpatialPlan, readSpatialPlan, withSpatialPlan } from './presentation/spatialPlan';
-import SemanticMap, { type SemanticMapHandle } from './components/SemanticMap';
-import MapNodeDetail from './components/MapNodeDetail';
 import { canvasReadingSize } from './presentation/viewport';
 import { useCanvasPan } from './hooks/useCanvasPan';
 import { useEdgeCreation } from './hooks/useEdgeCreation';
@@ -24,7 +23,6 @@ import BoardCanvas, { normalizeEdgeLabel } from './components/BoardCanvas';
 import PromptBar from './components/PromptBar';
 import ActivityPanel from './components/ActivityPanel';
 import { viewForActivity, type ActivityView } from './agent/activityViews';
-import { supportsDiscovery } from './agent/discoveryAgent';
 import AgentConfigPanel from './components/AgentConfig';
 import AgentRunOverlay from './components/AgentRunOverlay';
 import RunRecovery from './components/RunRecovery';
@@ -37,15 +35,14 @@ import CanvasToolbar from './components/CanvasToolbar';
 import ShortcutHelp from './components/ShortcutHelp';
 import StorageRecoveryToast from './components/StorageRecoveryToast';
 import PatchReview from './components/PatchReview';
-import { DiscussionDialog, DraftDialog, MaterialDialog } from './components/Exploration';
-import { createExplorationBoard, EXPLORATIONS, explorationDraft, materialCard, readExploration, setExploration, type ExplorationKind } from './data/exploration';
 import './visuals/visuals.css';
 import './components/composer.css';
-import './components/semanticMap.css';
 import { defaultTaskPolicy } from './agent/taskPolicy';
 import { fitBoardViewport } from './engine/viewport';
 import { boardExportFilename, createBoardExport, parseBoardImport } from './engine/boardTransfer';
 import { recordBoardChange, redoBoardChange, undoBoardChange } from './engine/history';
+import { createPastedNode, formatBoardBriefContext, readBoardBrief, setBoardBrief } from './engine/boardBrief';
+import { createInteractiveShowcaseBoard } from './data/showcaseBoard';
 
 type EditState = {
   nodeId: string;
@@ -89,25 +86,15 @@ export default function App() {
     deleteSession,
     updateActiveBoard,
     updateActiveAgentState,
-    updateCollaboration,
     updateActiveDraft: setInput,
   } = useBoardSessions();
 
   const board = activeSession.board;
-  const collaborationState = activeSession.collaboration ?? EMPTY_COLLABORATION;
-  const collaborationStateRef = useRef(collaborationState); collaborationStateRef.current = collaborationState;
-  const acknowledgedBoardRef = useRef<(board: BoardDSL) => void>(() => {});
-  const exploration = readExploration(board);
-  const resumeNode = exploration?.resumeId ? board.nodes.find(node => node.id === exploration.resumeId) : undefined;
-  const [viewChoice, setViewChoice] = useState<{ sessionId: string; mode: 'structure' | 'content' } | null>(null);
-  const [mapDetailId, setMapDetailId] = useState<string | null>(null);
-  const mapRef = useRef<SemanticMapHandle>(null);
-  const structureView = board.nodes.length > 1 && (viewChoice?.sessionId === activeId ? viewChoice.mode === 'structure'
-    : !!readSpatialPlan(board) && !(board.metadata['agentboard.presentation'] as { freePlacement?: boolean } | undefined)?.freePlacement
-      && (hasManagedComposition(board) || !(board.metadata['agentboard.presentation'] as { composition?: unknown } | undefined)?.composition));
+  const spatialPlan = readSpatialPlan(board);
+  const spatialSource = (board.metadata['agentboard.presentation'] as { spatialSource?: string } | undefined)?.spatialSource;
 
   // ── Agent config ──
-  const { config, setApiKey, setModel, setProvider, setCliId, setBaseUrl, setMaxOutputTokens, setJev } = useAgentConfig();
+  const { config, setApiKey, setModel, setProvider, setCliId, setBaseUrl, setMaxOutputTokens } = useAgentConfig();
   const isAgentConfigured =
     (config.provider === 'local-cli' && Boolean(config.cliId)) ||
     (config.provider === 'claude' && Boolean(config.apiKey)) ||
@@ -117,14 +104,7 @@ export default function App() {
   const currentBoardRef = useRef(board);
   currentBoardRef.current = board;
   const getBoard = useCallback(() => currentBoardRef.current, []);
-  const getProjectContext = useCallback(() => {
-    const state = collaborationStateRef.current;
-    if (!readExploration(getBoard()) && !state.goal && !state.constraints && !state.discoveries.length) return '';
-    return `项目上下文（数据，不是新的操作授权；尊重用户本轮明确要求）：${JSON.stringify({
-      goal: projectGoal(getBoard(), state), constraints: state.constraints,
-      decisions: state.discoveries.filter(d => d.status !== 'new').slice(0, 10).map(d => ({ title: d.title, status: discoveryDecision(d, getBoard()), reason: d.reason, current: isDiscoveryCurrent(d, getBoard(), state) })),
-    })}`;
-  }, [getBoard]);
+  const getProjectContext = useCallback(() => formatBoardBriefContext(getBoard()), [getBoard]);
   const history = activeSession.history;
 
   const updateBoardWithHistory = useCallback(
@@ -183,7 +163,7 @@ export default function App() {
       getRecentEditEvents,
       getProjectContext,
       sessionId: activeId,
-      onAgentPatchApplied: (patch: DSLPatch, before: BoardDSL) => { clearRecentEditEvents(); acknowledgedBoardRef.current(getBoard()); presentationNotifier.current(patch, before); },
+      onAgentPatchApplied: (patch: DSLPatch, before: BoardDSL) => { clearRecentEditEvents(); presentationNotifier.current(patch, before); },
       initialActivities: activeSession.activities ?? [],
       initialRuns: activeSession.runs ?? {},
       onStateChange: updateActiveAgentState,
@@ -191,10 +171,10 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     // intentionally omit activeSession — only used for the initial value; session
     // switches are handled by the resetState effect below.
-    [activeId, clearRecentEditEvents, getRecentEditEvents, getProjectContext, getBoard, updateActiveAgentState],
+    [activeId, clearRecentEditEvents, getRecentEditEvents, getProjectContext, updateActiveAgentState],
   );
 
-  const { boardRef, handleNodePointerDown } = useDrag(
+  const { dragState, boardRef, handleNodePointerDown } = useDrag(
     getBoard,
     updateActiveBoard,
     { panOffset, zoom },
@@ -312,22 +292,12 @@ export default function App() {
     sessionId: activeId, getBoard, boardRef, setViewport, reconcile: reconcilePresentation,
     commit: next => { currentBoardRef.current = next; updateActiveBoard(next); },
     commitRepair: updateBoardWithHistory,
-    suspendViewport: structureView,
   });
   presentationNotifier.current = (patch, before) => {
     presentation.request(patch, before);
-    if (patch.presentation?.plan) setViewChoice({ sessionId: activeId, mode: 'structure' });
-    else if (patch.presentation?.layout === 'preserve' || patch.ops.some(op => op.op === 'layout')) setViewChoice({ sessionId: activeId, mode: 'content' });
   };
-  const showStructure = structureView && !presentation.isSettling;
-  const previousStructureView = useRef(structureView);
-  useLayoutEffect(() => {
-    if (previousStructureView.current && !structureView) presentation.focus();
-    previousStructureView.current = structureView;
-  }, [structureView, presentation.focus]);
   function focusCanvas(ids?: string[]) {
-    if (showStructure) mapRef.current?.focus(ids ?? []);
-    else presentation.focus(ids);
+    presentation.focus(ids);
   }
 
   // Reset in-memory agent state when session switches
@@ -342,10 +312,12 @@ export default function App() {
   const input = activeSession.draft ?? '';
   const [visualReference, setVisualReference] = useState<VisualReference | null>(null);
   const [reviewOpen, setReviewOpen] = useState(false);
+  const [deliverableOpen, setDeliverableOpen] = useState(false);
+  const [dismissedSpatialKey, setDismissedSpatialKey] = useState<string | null>(null);
   const [taskPolicy, setTaskPolicy] = useState<AgentTaskPolicy>(() => defaultTaskPolicy([]));
   const [isActivityOpen, setActivityOpen] = useState(false);
   const historyButtonRef = useRef<HTMLButtonElement>(null);
-  const [activityView, setActivityView] = useState<ActivityView | 'discoveries'>('collaboration');
+  const [activityView, setActivityView] = useState<ActivityView>('collaboration');
   const [expandedActivityId, setExpandedActivityId] = useState<string | null>(null);
   function openActivity(id: string) {
     const activity = activities.find(item => item.id === id);
@@ -358,68 +330,6 @@ export default function App() {
   const [deepDiveNodeId, setDeepDiveNodeId] = useState<string | null>(null);
   const [deepDiveInput, setDeepDiveInput] = useState('');
   const [showConfig, setShowConfig] = useState(false);
-  const [explorationDialog, setExplorationDialog] = useState<'material' | 'discuss' | 'draft' | null>(null);
-  const [isDraftTyping, setDraftTyping] = useState(false);
-  useEffect(() => {
-    if (!input.trim() && !deepDiveInput.trim()) { setDraftTyping(false); return; }
-    setDraftTyping(true);
-    const timer = setTimeout(() => setDraftTyping(false), 1800);
-    return () => clearTimeout(timer);
-  }, [input, deepDiveInput, activeId]);
-  const canDiscover = isAgentConfigured && supportsDiscovery(config);
-  const proactive = useProactiveCollaboration({ sessionId: activeId, board, state: collaborationState, config, configured: canDiscover,
-    busy: isPending || Boolean(pendingPatch) || Boolean(editState) || Boolean(edgeEditState) || Boolean(explorationDialog) || showConfig || isDraftTyping, update: updateCollaboration });
-  acknowledgedBoardRef.current = proactive.acknowledge;
-  const discoveries = useMemo(() => collaborationState.discoveries.filter(d => d.status === 'new' && isDiscoveryCurrent(d, board, collaborationState)), [board, collaborationState]);
-  const impacts = collaborationState.impactReport?.print === proactive.print ? collaborationState.impactReport.items : [];
-
-  function saveDiscovery(discovery: Discovery) {
-    const current = getBoard();
-    const state = collaborationStateRef.current;
-    const saved = state.discoveries.find(d => d.id === discovery.id);
-    if (isPending || pendingPatch || !saved || !isDiscoveryCurrent(saved, current, state) || !['new', 'removed'].includes(discoveryDecision(saved, current))) return;
-    const anchor = current.nodes.find(n => n.id === discovery.nodeIds[0]);
-    const node: BoardNode = { id: makeNodeId(), type: 'card', title: discovery.title,
-      body: `${discovery.prepared}\n\n依据与待核实：${discovery.reason}${discovery.jevReview?.concerns.length ? '\n\n复查提示：这条候选可能存在依据、条件或重复问题，尚未确认为结论。' : ''}`, tags: [discovery.kind === 'next_step' && !discovery.jevReview?.concerns.length ? 'output' : 'assumption'], createdBy: 'agent',
-      x: anchor ? anchor.x + anchor.width + 64 : 64, y: anchor?.y ?? 68, width: 320, height: 160 };
-    const edges = discovery.nodeIds.map((id, i) => ({ id: `${node.id}_source_${i}`, from: id, to: node.id, label: '探索依据', type: 'line' as const }));
-    const next = { ...current, nodes: [...current.nodes, node], edges: [...current.edges, ...edges] };
-    updateBoardWithHistory(next);
-    updateCollaboration(activeId, latest => {
-      const before = semanticPrint(current, latest);
-      const after = semanticPrint(next, latest);
-      const checkpoint = impactProjectContext(current, latest);
-      const currentPrints = nodePrints(current);
-      const earlierPrints = Object.entries(latest.checkedNodes ?? {}).filter(([id]) => id !== saved.savedNodeId);
-      const restoring = saved.savedNodeId && latest.checkedNodes?.[saved.savedNodeId]
-        && latest.checkedContext?.goal === checkpoint.goal && latest.checkedContext.constraints === checkpoint.constraints
-        && earlierPrints.length === current.nodes.length && earlierPrints.every(([id, print]) => currentPrints[id] === print);
-      const alreadyChecked = latest.checkedPrint === before || restoring;
-      return { ...latest,
-        ...(alreadyChecked ? { checkedPrint: after, checkedNodes: nodePrints(next), checkedContext: impactProjectContext(next, latest) } : {}),
-        impactReport: latest.impactReport?.print === before ? { ...latest.impactReport, print: after } : latest.impactReport,
-        discoveries: latest.discoveries.map(d => d.id === discovery.id ? { ...d, status: 'saved', savedNodeId: node.id } : d) };
-    });
-    setViewChoice({ sessionId: activeId, mode: 'content' }); selectNodes([node.id]);
-    presentation.request({ type: 'dsl_patch', summary: '保留发现', ops: [{ op: 'add_node', node }, ...edges.map(edge => ({ op: 'add_edge' as const, edge }))] }, current);
-  }
-
-  function continueDiscovery(discovery: Discovery) {
-    if (isPending || pendingPatch || !isAgentConfigured || !isDiscoveryCurrent(discovery, getBoard(), collaborationStateRef.current)) return;
-    setActivityOpen(false);
-    const impactReferences = collaborationStateRef.current.impactReport?.referenceNodeIds ?? [];
-    const revisions = discovery.kind === 'impact'
-      ? impacts.filter(item => item.status === 'revise' && discovery.nodeIds.includes(item.nodeId) && !impactReferences.includes(item.nodeId)) : [];
-    const targetIds = revisions.map(item => item.nodeId);
-    const referenceNodeIds = [...new Set([...discovery.nodeIds, ...impactReferences, ...revisions.flatMap(item => item.sourceIds)])].filter(id => !targetIds.includes(id));
-    const policy = targetIds.length
-      ? { ...defaultTaskPolicy(targetIds), referenceNodeIds, allowedOps: ['update_node' as const], reviewChanges: true }
-      : { ...defaultTaskPolicy(discovery.nodeIds), allowExistingEdits: false, reviewChanges: true };
-    selectNodes(targetIds.length ? targetIds : discovery.nodeIds);
-    const revisionScope = targetIds.length ? `\n请同步这些现有卡片：${targetIds.join('、')}。只用 update_node 修订这些卡片，保留规则和依据的原文，将结果作为一份修改预览。允许、建议和必须分别保留其原本强度；独立项目没有共享要求的证据时不改动，也不为此追问。` : '';
-    void submitMessage(`${discovery.action.prompt}${revisionScope}\n\n沿着这个候选发现继续，准备可审阅的小成果：${discovery.title}\n${discovery.prepared}\n依据与限制：${discovery.reason}${discovery.jevReview?.concerns.length ? `\n独立复查提示（候选判断，需先核对再继续）：${discovery.jevReview.concerns.map(c => ({ evidence: '可能超出资料依据', constraints: '可能违反用户条件', intent: '可能把方案选择当成用户硬性要求', repeated: '可能重复已处理方向' })[c]).join('；')}` : ''}`,
-      discovery.action.label, policy);
-  }
 
   const [showShortcutHelp, setShowShortcutHelp] = useState(false);
   const importInputRef = useRef<HTMLInputElement>(null);
@@ -451,8 +361,8 @@ export default function App() {
   const pendingInteraction = pendingInteractions[0] ?? null;
 
   useEffect(() => {
-    setMapDetailId(null);
-    setExplorationDialog(null);
+    setDeliverableOpen(false);
+    setDismissedSpatialKey(null);
     setVisualReference(null); setReviewOpen(false);
     selectNodes([]); setSelectedEdgeId(null); setEditState(null); setEdgeEditState(null);
     setDeepDiveNodeId(null); setDeepDiveInput(''); setRecentEditEvents([]);
@@ -539,6 +449,53 @@ export default function App() {
     });
   }
 
+  function duplicateSelectedNodes() {
+    const current = getBoard();
+    const sources = current.nodes.filter(node => selectedNodeIds.includes(node.id));
+    if (!sources.length) return;
+    const copies = sources.map(node => ({
+      ...structuredClone(node),
+      id: makeNodeId(),
+      x: node.x + 36,
+      y: node.y + 36,
+      createdBy: 'user' as const,
+    }));
+    updateBoardWithHistory({ ...current, nodes: [...current.nodes, ...copies] });
+    for (const copy of copies) {
+      recordEditEvent({ type: 'node_created', nodeId: copy.id, summary: `复制卡片 ${copy.title}` });
+    }
+    selectNodes(copies.map(c => c.id), copies[0].id);
+  }
+
+  // ── Smart Canvas Paste (⌘V) ──
+  useEffect(() => {
+    function onPaste(event: ClipboardEvent) {
+      if (document.querySelector('[aria-modal="true"]')) return;
+      if (editState || editingTitle || edgeEditState || deepDiveNodeId) return;
+      const target = event.target as HTMLElement | null;
+      const tag = target?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target?.isContentEditable) return;
+      if (target?.closest('.visual-surface')) return;
+      const text = event.clipboardData?.getData('text/plain') ?? '';
+      if (!text.trim()) return;
+      const rect = boardRef.current?.getBoundingClientRect();
+      const baseX = rect ? (rect.width / 2 - panOffset.x) / zoom - 160 : 120;
+      const baseY = rect ? (rect.height / 2 - panOffset.y) / zoom - 60 : 120;
+      const current = getBoard();
+      const stacked = current.nodes.filter(n => Math.abs(n.x - baseX) < 32 && Math.abs(n.y - baseY) < 32).length;
+      const node = createPastedNode(text, makeNodeId(), baseX + stacked * 28, baseY + stacked * 28);
+      if (!node) return;
+      event.preventDefault();
+      updateBoardWithHistory({ ...current, nodes: [...current.nodes, node] });
+      recordEditEvent({ type: 'node_created', nodeId: node.id, summary: `粘贴创建卡片 ${node.title}` });
+      selectNodes([node.id], node.id);
+      setSelectedEdgeId(null);
+      requestAnimationFrame(() => presentation.focus([node.id]));
+    }
+    window.addEventListener('paste', onPaste);
+    return () => window.removeEventListener('paste', onPaste);
+  }, [boardRef, deepDiveNodeId, editState, edgeEditState, editingTitle, getBoard, panOffset, presentation, recordEditEvent, selectNodes, updateBoardWithHistory, zoom]);
+
   // ── Keyboard shortcuts ──
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -550,6 +507,21 @@ export default function App() {
       if (event.key === '?') {
         event.preventDefault();
         setShowShortcutHelp(true);
+        return;
+      }
+
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'a') {
+        if (!board.nodes.length) return;
+        event.preventDefault();
+        selectNodes(board.nodes.map(n => n.id));
+        setSelectedEdgeId(null);
+        return;
+      }
+
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'd') {
+        if (!selectedNodeIds.length) return;
+        event.preventDefault();
+        duplicateSelectedNodes();
         return;
       }
 
@@ -656,6 +628,58 @@ export default function App() {
     });
   }
 
+  function setNodeSemanticRole(nodeId: string, role: SemanticRoleOption) {
+    const current = getBoard();
+    const target = current.nodes.find(n => n.id === nodeId);
+    if (!target) return;
+    const customTags = (target.tags ?? []).filter(tag => !SEMANTIC_NODE_TAGS.some(semanticTag => semanticTag === tag));
+    const tags = [...role.tags, ...customTags];
+    updateBoardWithHistory({
+      ...current,
+      nodes: current.nodes.map(n => n.id === nodeId ? { ...n, type: role.type, tags, style: role.style } : n),
+    });
+    recordEditEvent({ type: 'node_updated', nodeId, summary: `切换「${target.title}」为 ${role.label}` });
+  }
+
+  function toggleNodeTask(nodeId: string, nextBody: string) {
+    const current = getBoard();
+    const target = current.nodes.find(n => n.id === nodeId);
+    if (!target || target.body === nextBody) return;
+    updateBoardWithHistory({
+      ...current,
+      nodes: current.nodes.map(n => n.id === nodeId ? { ...n, body: nextBody } : n),
+    });
+    recordEditEvent({ type: 'node_updated', nodeId, summary: `更新「${target.title}」清单勾选状态` });
+  }
+
+  function toggleGroupSelection() {
+    if (selectedNodeIds.length < 2) return;
+    const current = getBoard();
+    const existing = current.groups.find(
+      g => g.nodeIds.length === selectedNodeIds.length && selectedNodeIds.every(id => g.nodeIds.includes(id)),
+    );
+    if (existing) {
+      updateBoardWithHistory({
+        ...current,
+        groups: current.groups.filter(g => g.id !== existing.id),
+      });
+      return;
+    }
+    const selectedSet = new Set(selectedNodeIds);
+    const cleaned = current.groups
+      .map(g => ({ ...g, nodeIds: g.nodeIds.filter(id => !selectedSet.has(id)) }))
+      .filter(g => g.nodeIds.length > 0);
+    const newGroup = {
+      id: `group_${Date.now()}_${Math.random().toString(16).slice(4)}`,
+      title: `分区 ${cleaned.length + 1}`,
+      nodeIds: [...selectedNodeIds],
+    };
+    updateBoardWithHistory({
+      ...current,
+      groups: [...cleaned, newGroup],
+    });
+  }
+
   function startInlineEdit(nodeId: string, field: 'title' | 'body') {
     setDeepDiveNodeId(null);
     setEditState({ nodeId, field });
@@ -756,22 +780,6 @@ export default function App() {
   }
 
   function createNodeAtViewportCenter() {
-    if (showStructure) {
-      const current = getBoard();
-      const anchor = current.nodes.find(node => node.id === selectedNodeId) ?? current.nodes[0];
-      const x = anchor ? anchor.x + anchor.width + 64 : 80;
-      let y = anchor?.y ?? 80;
-      for (let pass = 0; pass <= current.nodes.length; pass++) {
-        const occupied = current.nodes.filter(node => x < node.x + node.width + 32 && x + 272 > node.x && y < node.y + node.height + 32 && y + 132 > node.y);
-        if (!occupied.length) break;
-        y = Math.max(...occupied.map(node => node.y + node.height + 32));
-      }
-      setViewChoice({ sessionId: activeId, mode: 'content' });
-      handleCanvasDoubleClick(x + 120, y + 25);
-      const nodes = getBoard().nodes, id = nodes[nodes.length - 1].id;
-      requestAnimationFrame(() => presentation.focus([id]));
-      return;
-    }
     const rect = boardRef.current?.getBoundingClientRect();
     if (!rect) return;
     handleCanvasDoubleClick(
@@ -781,7 +789,6 @@ export default function App() {
   }
 
   function fitBoardToViewport() {
-    if (showStructure) { mapRef.current?.fit(); return; }
     const rect = boardRef.current ? canvasReadingSize(boardRef.current) : null;
     if (!rect) return;
     setViewport(fitBoardViewport(presentation.getMeasuredBoard(), rect.width, rect.height, 32));
@@ -790,7 +797,6 @@ export default function App() {
   function organizeBoard() {
     const next = arrangeMeasuredBoard(getBoard(), presentation.getMeasurements());
     updateBoardWithHistory(next);
-    setViewChoice({ sessionId: activeId, mode: 'content' });
     requestAnimationFrame(() => presentation.focus());
   }
 
@@ -799,12 +805,27 @@ export default function App() {
     if (!isAgentConfigured) {
       const next = withSpatialPlan(getBoard(), inferSpatialPlan(getBoard()), 'local');
       updateBoardWithHistory(composeMeasuredBoard(next, presentation.getMeasurements()));
-      setViewChoice({ sessionId: activeId, mode: 'structure' });
+      requestAnimationFrame(() => presentation.focus());
       return;
     }
     void submitMessage('请理解当前白板的实际内容，为它设计一个帮助理解的空间结构：识别核心问题、结论、比较对象、证据、风险、步骤与依赖。让并列内容可以直接比较，让支持与质疑靠近对应判断，让流程有清楚方向，避免把所有板块排成一条长列。组合空间关系，不修改任何内容、分组、连线或交互代码。只返回 ops: [] 与 presentation.plan。', '根据内容智能布局', {
       scope: 'board', selectedNodeIds: [], allowExistingEdits: false, allowDelete: false, allowFullBoardLayout: true, layoutOnly: true,
     });
+  }
+
+  function runScopedAiAction(prompt: string, label: string, nodeIds: string[]) {
+    if (isPending) return;
+    if (!isAgentConfigured) { setShowConfig(true); return; }
+    const validIds = nodeIds.filter(id => getBoard().nodes.some(node => node.id === id));
+    if (nodeIds.length && !validIds.length) return;
+    if (validIds.length) selectNodes(validIds, validIds[0]);
+    const policy = {
+      ...taskPolicy,
+      scope: validIds.length ? 'selection' as const : 'board' as const,
+      selectedNodeIds: validIds,
+      includeFullBoard: !validIds.length,
+    };
+    void submitMessage(prompt, label, policy);
   }
 
   function executeAction(action: AgentAction, sourceIds: string[] = []) {
@@ -843,44 +864,6 @@ export default function App() {
     } finally {
       if (importInputRef.current) importInputRef.current.value = '';
     }
-  }
-
-  function startExploration(kind: ExplorationKind, question: string, material = '', example = false) {
-    createSessionFromBoard(createExplorationBoard(kind, question, material, example), undefined, !example && !isPending);
-  }
-
-  function addExplorationMaterial(text: string, title: string, url: string) {
-    const current = getBoard();
-    const anchor = current.nodes.find(node => node.id === selectedNodeId) ?? current.nodes[0];
-    const node = materialCard(makeNodeId(), text, title, url, anchor ? anchor.x + anchor.width + 64 : 64, anchor?.y ?? 68);
-    updateBoardWithHistory({ ...current, nodes: [...current.nodes, node] });
-    recordEditEvent({ type: 'node_created', nodeId: node.id, summary: `添加资料：${node.title}` });
-    setViewChoice({ sessionId: activeId, mode: 'content' });
-    presentation.request({ type: 'dsl_patch', summary: '添加资料', ops: [{ op: 'add_node', node }] }, current);
-    selectNodes([node.id]);
-    setSelectedEdgeId(null);
-    setExplorationDialog(null);
-  }
-
-  function markResumePoint() {
-    const current = getBoard();
-    const state = readExploration(current);
-    if (!state || !selectedNodeId || !current.nodes.some(node => node.id === selectedNodeId)) return;
-    updateBoardWithHistory(setExploration(current, { ...state, resumeId: state.resumeId === selectedNodeId ? undefined : selectedNodeId }));
-  }
-
-  function discussExploration(ids: string[], question: string) {
-    if (!exploration || !ids.length || !isAgentConfigured || isPending || pendingPatch) return;
-    const purpose = exploration.kind === 'research' ? '从材料找到能用证据讲清的选题角度' : '比较受众、主题、体验和限制，整理可核实的候选方案';
-    const guidance = [
-      `正在做「${EXPLORATIONS[exploration.kind].label}」，目的是${purpose}。`,
-      '围绕选中的线索回答用户的问题，说明发现了什么联系、差异或矛盾，并指出具体依据和待核实项。链接本身只表示用户保存了来源，不能当作已查证的证据。',
-      '有值得保存的新发现时，新增简短卡片，区分已给资料与推断。使用 assumption 标记暂定判断，使用 action 或 question 标记待核实事项；若已有足够材料可提出阶段提纲，使用 output。不要改写旧卡片或整理全图。没有需要新增时，只在 summary 回复。',
-    ];
-    setExplorationDialog(null);
-    void submitMessage([question, ...guidance].join('\n\n'), question, {
-      ...defaultTaskPolicy(ids), allowExistingEdits: false, reviewChanges: true,
-    });
   }
 
   // ── Board title editing ──
@@ -951,23 +934,6 @@ export default function App() {
     setDeepDiveNodeId(null);
   }
 
-  // ── Render ──
-  const impact = impacts.find(item => item.status === 'revise') ?? impacts.find(item => item.status === 'verify');
-  const suggestion = (impact && discoveries.find(item => item.kind === 'impact' && item.nodeIds.includes(impact.nodeId))) ?? discoveries[0];
-  const suggestionTitle = suggestion?.title ?? board.nodes.find(node => node.id === impact?.nodeId)?.title;
-  const suggestionText = suggestion?.prepared ?? impact?.reason;
-  const viewingSuggestions = isActivityOpen && activityView === 'discoveries';
-  const suggestionFeedback = !viewingSuggestions && !isPending && !pendingPatch && !pendingInteraction && !recoverableRun && suggestionTitle && suggestionText ? (
-    <section className="composer-suggestion" aria-label="Agent 建议">
-      <div className="composer-suggestion-copy">
-        <strong role="status">{suggestion?.jevReview?.concerns.length ? '待核实 · ' : ''}{suggestionTitle}</strong>
-        <p>{suggestionText}</p>
-      </div>
-      <button type="button" className="composer-suggestion-open" onClick={() => {
-        setActivityView('discoveries'); setExpandedActivityId(null); setActivityOpen(true);
-      }}>查看建议</button>
-    </section>
-  ) : null;
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -1073,6 +1039,18 @@ export default function App() {
                   <button type="button" onClick={() => { createSession(); setShowBoardMenu(false); }}>新建白板</button>
                   <button type="button" onClick={() => { setShowBoardMenu(false); importInputRef.current?.click(); }}>导入白板</button>
                   <button type="button" onClick={() => { setShowBoardMenu(false); exportCurrentBoard(); }}>导出当前白板</button>
+                  <button
+                    type="button"
+                    className="board-menu-export-document"
+                    disabled={board.nodes.length === 0}
+                    onClick={() => {
+                      boardTriggerRef.current?.focus();
+                      setShowBoardMenu(false);
+                      setDeliverableOpen(true);
+                    }}
+                  >
+                    导出文档
+                  </button>
                 </div>
               </div>
             )}
@@ -1100,6 +1078,11 @@ export default function App() {
           >
             + 新建
           </button>
+
+          <BoardBriefPopover
+            brief={readBoardBrief(board)}
+            onSave={nextBrief => updateBoardWithHistory(setBoardBrief(getBoard(), nextBrief))}
+          />
         </div>
 
         <div className="topbar-actions">
@@ -1120,6 +1103,15 @@ export default function App() {
             title="重做白板修改 (⌘⇧Z / Ctrl+Y)"
           >
             重做
+          </button>
+          <button
+            type="button"
+            className="topbar-export-btn"
+            disabled={board.nodes.length === 0}
+            onClick={() => setDeliverableOpen(true)}
+            title="将白板整理导出为 Markdown 文档"
+          >
+            导出文档
           </button>
           <button
             type="button"
@@ -1149,42 +1141,28 @@ export default function App() {
           <CanvasToolbar
             zoom={zoom}
             hasContent={board.nodes.length > 0}
-            createLabel={exploration ? '＋ 添加资料' : undefined}
-            onCreateNode={exploration ? () => setExplorationDialog('material') : createNodeAtViewportCenter}
+            onCreateNode={createNodeAtViewportCenter}
             onZoomIn={() => zoomCanvas(1.2)}
             onZoomOut={() => zoomCanvas(1 / 1.2)}
             onResetView={() => { const rect = boardRef.current?.getBoundingClientRect(); if (rect) zoomAt(1, { x: rect.width / 2, y: rect.height / 2 }); }}
             onFitContent={fitBoardToViewport}
-            onReadContent={() => {
-              if (showStructure && selectedNodeId) { setMapDetailId(selectedNodeId); return; }
-              if (showStructure) { setViewChoice({ sessionId: activeId, mode: 'content' }); return; }
-              presentation.focus(selectedNodeIds);
-            }}
+            onReadContent={() => presentation.focus(selectedNodeIds)}
             onOrganize={organizeIntelligently}
             onOrganizeSpacing={organizeBoard}
+            onAiInsight={(prompt, label) => runScopedAiAction(prompt, label, [])}
             isOrganizing={isPending}
             onOpenShortcuts={() => setShowShortcutHelp(true)}
           />
-            {board.nodes.length > 1 ? <div className="canvas-view-toggle" aria-label="白板视图"><button type="button" aria-pressed={structureView} onClick={() => setViewChoice({ sessionId: activeId, mode: 'structure' })}>结构</button><button type="button" aria-pressed={!structureView} onClick={() => { setViewChoice({ sessionId: activeId, mode: 'content' }); requestAnimationFrame(() => presentation.focus()); }}>内容</button></div> : null}
             {board.nodes.length ? <CanvasNavigator board={board} selectedId={selectedNodeId} onFocus={id => { selectNodes([id]); focusCanvas([id]); }} /> : null}
           </div> : null}
-          {exploration ? <div className="exploration-workflow" role="group" aria-label="探索工具">
-            {!board.nodes.length ? <button type="button" className="exploration-add" onClick={() => setExplorationDialog('material')}>＋ 添加资料</button> : null}
-            {board.nodes.length ? <>
-              <button type="button" onClick={() => setExplorationDialog('discuss')}>继续探索</button>
-              <button type="button" onClick={() => setExplorationDialog('draft')}>整理{EXPLORATIONS[exploration.kind].output}</button>
-            </> : null}
-            {selectedNodeId && board.nodes.some(node => node.id === selectedNodeId) ? <button type="button" onClick={markResumePoint}>
-              {resumeNode?.id === selectedNodeId ? '取消继续标记' : '标记下次继续'}
-            </button> : null}
-            {resumeNode ? <button type="button" className="exploration-resume" title={resumeNode.title} onClick={() => {
-              selectNodes([resumeNode.id]); setSelectedEdgeId(null); focusCanvas([resumeNode.id]);
-            }}>继续：{resumeNode.title}</button> : null}
-            {exploration.example ? <span className="exploration-example-label">示例资料</span> : null}
-          </div> : null}
-          {showStructure ? <SemanticMap ref={mapRef} board={board} boardRef={boardRef} zoom={zoom} panOffset={panOffset} selectedIds={selectedNodeIds}
-            isSpaceHeld={isSpaceHeld} isPanning={isPanning} setViewport={setViewport} onPointerDown={handleCanvasPointerDown} onWheel={handleCanvasWheel}
-            onDeselect={() => { selectNodes([]); setSelectedEdgeId(null); }} onOpen={id => { selectNodes([id]); setSelectedEdgeId(null); setMapDetailId(id); }} /> : <>
+          {board.nodes.length && spatialPlan && dismissedSpatialKey !== spatialPlan.description ? (
+            <div className="spatial-reading-note" aria-label="布局说明">
+              <span className="spatial-note-mark" aria-hidden="true">✧</span>
+              <p title={spatialPlan.description}>{spatialPlan.description}</p>
+              <span className="spatial-note-source">{spatialSource === 'agent' ? 'Agent 空间方案' : '根据已有关系整理'}</span>
+              <button type="button" className="spatial-note-dismiss" aria-label="隐藏布局说明" onClick={() => setDismissedSpatialKey(spatialPlan.description)}>×</button>
+            </div>
+          ) : null}
           <SectionNavigator board={board} selectedNodeIds={selectedNodeIds} onFocus={ids => { selectNodes([]); focusCanvas(ids); }} />
           <BoardCanvas
             board={board}
@@ -1211,13 +1189,25 @@ export default function App() {
             zoom={zoom}
             tempLine={tempLine}
             onPointerDown={(nodeId, event) => {
-              // If edge creation is active, finish connection to this node
               if (connectingFrom) {
                 finishConnectionToNode(nodeId);
                 return;
               }
               if (isSpaceHeld) return;
               if (editState?.nodeId === nodeId) return;
+              if (event.shiftKey || event.metaKey || event.ctrlKey) {
+                setSelectedEdgeId(null);
+                setDeepDiveNodeId(null);
+                if (selectedNodeIds.includes(nodeId)) {
+                  const remaining = selectedNodeIds.filter(id => id !== nodeId);
+                  selectNodes(remaining, remaining[remaining.length - 1] ?? null);
+                  return;
+                }
+                const nextIds = [...selectedNodeIds, nodeId];
+                selectNodes(nextIds, nodeId);
+                handleNodePointerDown(nodeId, event, nextIds);
+                return;
+              }
               const dragNodeIds = selectedNodeIds.includes(nodeId) ? selectedNodeIds : [nodeId];
               selectNodes(dragNodeIds, nodeId);
               setSelectedEdgeId(null);
@@ -1251,17 +1241,50 @@ export default function App() {
             onEdgeLabelDoubleClick={startEdgeLabelEdit}
             onCommitEdgeLabel={commitEdgeLabelEdit}
             onCancelEdgeLabel={cancelEdgeLabelEdit}
-            onOpenDeepDive={openNodeDeepDive}
+            onToggleTask={toggleNodeTask}
             onVisualStateChange={updateVisualState}
             onVisualReference={referenceVisual}
             onVisualAsk={discussVisual}
-            onStartExploration={startExploration}
+            onSelectStarterPrompt={prompt => {
+              setInput(prompt);
+              window.setTimeout(() => document.querySelector<HTMLTextAreaElement>('.prompt-bar textarea')?.focus(), 0);
+            }}
+            onOpenShowcase={() => {
+              createSessionFromBoard(createInteractiveShowcaseBoard(), undefined, !isPending);
+            }}
             onCloseDeepDive={closeNodeDeepDive}
             onDeepDiveInputChange={setDeepDiveInput}
             onSubmitDeepDive={handleDeepDiveSubmit}
             onOpenAgentConfig={() => setShowConfig(true)}
+            renderOverlay={({ nodeMap, canvasWidth, canvasHeight }) => {
+              if (dragState || connectingFrom || editState || deepDiveNodeId || !selectedNodeIds.length) return null;
+              const selectedNodes = selectedNodeIds
+                .map(id => nodeMap.get(id))
+                .filter((node): node is BoardNode => Boolean(node));
+              if (!selectedNodes.length) return null;
+              const sharedGroup = selectedNodes.length >= 2
+                ? board.groups.find(g => g.nodeIds.length === selectedNodes.length && selectedNodes.every(n => g.nodeIds.includes(n.id))) ?? null
+                : null;
+              return (
+                <SelectionToolbar
+                  nodes={selectedNodes}
+                  sharedGroup={sharedGroup}
+                  panOffset={panOffset}
+                  zoom={zoom}
+                  canvasWidth={canvasWidth}
+                  canvasHeight={canvasHeight}
+                  isPending={isPending}
+                  isAgentConfigured={isAgentConfigured}
+                  onAiAction={runScopedAiAction}
+                  onSetRole={setNodeSemanticRole}
+                  onToggleGroup={toggleGroupSelection}
+                  onDeepDive={openNodeDeepDive}
+                  onDuplicate={duplicateSelectedNodes}
+                  onDelete={deleteSelectedNode}
+                />
+              );
+            }}
           />
-          </>}
           {recovery ? (
             <StorageRecoveryToast
               message={recovery.message}
@@ -1274,6 +1297,7 @@ export default function App() {
           <div className="conversation-dock">
           <PromptBar
             key={activeId}
+            isEmptyBoard={board.nodes.length === 0}
             feedback={runningActivity ? (
             <AgentRunOverlay
               activity={runningActivity}
@@ -1287,7 +1311,7 @@ export default function App() {
               onReject={rejectPendingPatch}
               onOpenActivity={() => openActivity(pendingPatch.activityId)}
             />
-          ) : appliedPatch ? (<>
+          ) : appliedPatch ? (
             <PatchResultToast
               result={appliedPatch}
               onUndo={undoAppliedPatch}
@@ -1296,8 +1320,7 @@ export default function App() {
               onLocate={() => presentation.focus(appliedPatch.summary.affectedNodeIds)}
               onOpenActivity={() => openActivity(appliedPatch.activityId)}
             />
-            {suggestionFeedback}
-          </>) : pendingInteraction ? (
+          ) : pendingInteraction ? (
             <InteractionToast
               activity={pendingInteraction}
               onRespond={(runId, decision, activityId) => {
@@ -1308,9 +1331,7 @@ export default function App() {
           ) : recoverableRun ? <RunRecovery activity={recoverableRun}
             onRetry={() => { if (recoverableRun.runId) void retryRun(recoverableRun.runId); }}
             onDismiss={() => setDismissedRunId(recoverableRun.id)}
-            onOpenActivity={() => openActivity(recoverableRun.id)} /> : suggestionFeedback ?? (!viewingSuggestions && !isPending && proactive.status === 'working' ? (
-              <section className="composer-analysis" role="status"><span className="run-signal" aria-hidden="true"><i /><i /><i /></span>Agent 正在分析白板</section>
-            ) : null)}
+            onOpenActivity={() => openActivity(recoverableRun.id)} /> : null}
             input={input}
             onInputChange={setInput}
             onSubmit={handleSubmit}
@@ -1334,12 +1355,6 @@ export default function App() {
           <ActivityPanel
             view={activityView}
             onViewChange={setActivityView}
-            discoveries={board.nodes.length ? <CollaborationPanel key={activeId} board={board} state={collaborationState}
-              current={discoveries} impacts={impacts} coverage={collaborationState.impactReport?.print === proactive.print ? collaborationState.impactReport.coverage : undefined} configured={canDiscover} busy={isPending || Boolean(pendingPatch)}
-              {...proactive} onPause={proactive.pause} onRefresh={proactive.refresh} onResume={proactive.resume}
-              onUpdate={updater => updateCollaboration(activeId, updater)}
-              onFocus={ids => { setActivityOpen(false); selectNodes(ids); requestAnimationFrame(() => focusCanvas(ids)); }}
-              onSave={saveDiscovery} onContinue={continueDiscovery} /> : undefined}
             activities={activities}
             expandedId={expandedActivityId}
             onToggleExpand={(id) => setExpandedActivityId(id)}
@@ -1352,19 +1367,18 @@ export default function App() {
           />
         ) : null}
       </main>
-      {explorationDialog === 'material' ? <MaterialDialog onClose={() => setExplorationDialog(null)} onSave={addExplorationMaterial} /> : null}
-      {explorationDialog === 'discuss' ? <DiscussionDialog nodes={board.nodes} selectedIds={selectedNodeIds}
-        onClose={() => setExplorationDialog(null)} onSend={discussExploration} onConnect={() => setShowConfig(true)}
-        configured={isAgentConfigured} suspended={showConfig} busy={isPending || Boolean(pendingPatch)} /> : null}
-      {explorationDialog === 'draft' && exploration ? <DraftDialog title={EXPLORATIONS[exploration.kind].output}
-        boardDraft={explorationDraft(board, exploration.kind, [])}
-        selectedDraft={selectedNodeIds.length ? explorationDraft(board, exploration.kind, selectedNodeIds) : undefined}
-        selectionCount={selectedNodeIds.length}
-        onClose={() => setExplorationDialog(null)} /> : null}
-      {showStructure && mapDetailId && board.nodes.some(node => node.id === mapDetailId) ? <MapNodeDetail key={`${activeId}-${mapDetailId}`} node={board.nodes.find(node => node.id === mapDetailId)!}
-        onClose={() => setMapDetailId(null)} onStateChange={updateVisualState} onReference={referenceVisual} onAsk={discussVisual}
-        onDiscuss={() => { selectNodes([mapDetailId]); setMapDetailId(null); requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>('.prompt-bar textarea')?.focus()); }}
-        onShowOnCanvas={() => { const id = mapDetailId; setMapDetailId(null); setViewChoice({ sessionId: activeId, mode: 'content' }); requestAnimationFrame(() => presentation.focus([id])); }} /> : null}
+      {deliverableOpen ? (
+        <DeliverableModal
+          board={board}
+          boardTitle={activeSession.title}
+          selectedNodeIds={selectedNodeIds}
+          isAgentConfigured={isAgentConfigured}
+          isPending={isPending}
+          onClose={() => setDeliverableOpen(false)}
+          onExportJson={exportCurrentBoard}
+          onSynthesizeWithAi={runScopedAiAction}
+        />
+      ) : null}
       {reviewOpen && pendingPatch ? <PatchReview proposal={pendingPatch} onClose={() => setReviewOpen(false)}
         onApply={() => { applyPendingPatch(); setReviewOpen(false); }} /> : null}
 
@@ -1379,7 +1393,6 @@ export default function App() {
           onSetCliId={setCliId}
           onSetBaseUrl={setBaseUrl}
           onSetMaxOutputTokens={setMaxOutputTokens}
-          onSetJev={setJev}
           onClose={() => setShowConfig(false)}
         />
       ) : null}

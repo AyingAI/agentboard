@@ -8,16 +8,16 @@ describe('agent onboarding helpers', () => {
     { id: 'codex', name: 'Codex CLI', available: true },
   ];
 
-  it('only offers detected CLIs', () => {
-    expect(availableClis(clis).map((cli) => cli.id)).toEqual(['pi', 'codex']);
+  it('only offers detected CLIs ordered by priority', () => {
+    expect(availableClis(clis).map((cli) => cli.id)).toEqual(['codex', 'pi']);
   });
 
-  it('prefers an installed Pi even when Claude was detected first', () => {
-    expect(recommendedCli([{ id: 'claude', name: 'Claude Code', available: true }, ...clis])?.id).toBe('pi');
+  it('prefers mainstream installed CLIs when available', () => {
+    expect(recommendedCli([{ id: 'claude', name: 'Claude Code', available: true }, ...clis])?.id).toBe('claude');
     expect(recommendedCli([])).toBeNull();
   });
 
-  it('falls back to an actually installed tool without offering an unavailable Pi', () => {
-    expect(recommendedCli([{ id: 'pi', name: 'Pi CLI', available: false }, { id: 'codex', name: 'Codex CLI', available: true }])?.id).toBe('codex');
+  it('falls back to available CLIs when higher-priority ones are missing', () => {
+    expect(recommendedCli([{ id: 'claude', name: 'Claude Code', available: false }, { id: 'pi', name: 'Pi CLI', available: true }])?.id).toBe('pi');
   });
 });

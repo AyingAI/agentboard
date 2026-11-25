@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { emptyBoard } from '../data/initialBoard';
+import { readBoardBrief, setBoardBrief } from '../engine/boardBrief';
 import { loadSessions, saveSessions } from '../storage';
 import type { BoardDSL } from '../types/dsl';
 
@@ -108,6 +109,36 @@ describe('session storage', () => {
 
     expect(data.sessions[0].history?.past[0].board.title).toBe('之前版本');
     expect(data.sessions[0].history?.future[0].board.title).toBe('重做版本');
+  });
+
+  it('migrates legacy goals into the board and its history without overwriting newer values', () => {
+    const oldBoard = boardWithOneNode();
+    const currentBoard = setBoardBrief(oldBoard, { goal: '当前目标' });
+    const data = {
+      sessions: [{
+        id: 'legacy',
+        title: '本地历史',
+        board: currentBoard,
+        history: { past: [oldBoard], future: [currentBoard] },
+        collaboration: { goal: '  旧版目标  ', constraints: '  旧版约束  ', discoveries: [] },
+        createdAt: 1,
+        updatedAt: 2,
+      }],
+      activeId: 'legacy',
+    };
+    localStorage.setItem('agentboard.sessions', JSON.stringify(data));
+
+    const migrated = loadSessions(emptyBoard);
+    const [session] = migrated.sessions;
+    expect(readBoardBrief(session.board)).toEqual({ goal: '当前目标', constraints: '旧版约束' });
+    expect(readBoardBrief(session.history!.past[0])).toEqual({ goal: '旧版目标', constraints: '旧版约束' });
+    expect(readBoardBrief(session.history!.future[0])).toEqual({ goal: '当前目标', constraints: '旧版约束' });
+    expect(session.board.nodes).toEqual(oldBoard.nodes);
+    expect(session).not.toHaveProperty('collaboration');
+
+    session.board = setBoardBrief(session.board, {});
+    saveSessions(migrated);
+    expect(readBoardBrief(loadSessions(emptyBoard).sessions[0].board)).toEqual({});
   });
 
   it.each([null, '{}', '{"sessions":[null],"activeId":"bad"}'])('recovers a backup when the primary is missing or structurally invalid: %s', raw => {

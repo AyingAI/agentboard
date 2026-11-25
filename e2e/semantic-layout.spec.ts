@@ -36,14 +36,22 @@ async function respond(page: Page, value: unknown, requests: any[] = []) {
 }
 const response = { type: 'dsl_patch', summary: '根据实际内容重组了空间关系，三个方向并排比较，证据与风险就近。', ops: [], presentation: { layout: 'auto', plan } };
 
-test('smart layout reads content, changes only spatial structure and opens a readable map', async ({ page }) => {
-  const requests: any[] = []; await respond(page, response, requests); await init(page, scenario());
+test('smart layout reads content, changes only spatial structure on the unified canvas and supports undo', async ({ page }) => {
+  const requests: any[] = [];
+  await respond(page, response, requests);
+  await init(page, {
+    ...scenario(),
+    metadata: { 'agentboard.brief': { goal: '优先验证能直接交付的方向', constraints: '阅读时先看风险' } },
+  });
   const before = await stored(page);
   await page.locator('.prompt-bar textarea').fill('保留这段未发送的想法');
   await page.getByRole('button', { name: '智能布局', exact: true }).click();
-  await expect(page.locator('.semantic-map-node')).toHaveCount(10);
-  expect(requests).toHaveLength(1); expect(requests[0].userMessage).toContain('用户会手动补清单'); expect(requests[0].userMessage).not.toContain('<script>');
   await expect(page.locator('.spatial-reading-note')).toContainText(plan.description);
+  await expect(page.locator('.canvas-content')).not.toHaveClass(/presentation-settling/);
+  await expect(page.locator('.board-node')).toHaveCount(10);
+  expect(requests).toHaveLength(1); expect(requests[0].userMessage).toContain('用户会手动补清单'); expect(requests[0].userMessage).not.toContain('<script>');
+  expect(requests[0].userMessage).toContain('优先验证能直接交付的方向');
+  expect(requests[0].userMessage).toContain('阅读时先看风险');
   const after = await stored(page);
   const content = (nodes: any[]) => nodes.map(({ x, y, height, ...rest }) => rest);
   expect(content(after.board.nodes)).toEqual(content(before.board.nodes)); expect(after.board.groups).toEqual(before.board.groups); expect(after.board.edges).toEqual(before.board.edges);
@@ -51,33 +59,27 @@ test('smart layout reads content, changes only spatial structure and opens a rea
   await expect(page.locator('.prompt-bar textarea')).toHaveValue('保留这段未发送的想法');
   await page.getByRole('button', { name: '关闭完成提示', exact: true }).click();
   await page.locator('.prompt-bar textarea').fill(''); await page.locator('.canvas-header').click({ position: { x: 450, y: 12 } });
-  const canvas = (await page.locator('.semantic-map').boundingBox())!;
-  const cards = await page.locator('.semantic-map-node').evaluateAll(es => es.map(e => { const r = e.getBoundingClientRect(), t = e.querySelector('strong')!; return { id: (e as HTMLElement).dataset.mapNodeId, x: r.x, y: r.y, right: r.right, bottom: r.bottom, font: Number.parseFloat(getComputedStyle(t).fontSize) }; }));
-  for (const card of cards) { expect(card.x).toBeGreaterThanOrEqual(canvas.x); expect(card.right).toBeLessThanOrEqual(canvas.x + canvas.width); expect(card.y).toBeGreaterThanOrEqual(canvas.y); expect(card.bottom).toBeLessThan(canvas.y + canvas.height - 40); }
-  const a = cards.find(n => n.id === 'a')!, b = cards.find(n => n.id === 'b')!, c = cards.find(n => n.id === 'c')!;
+  const a = after.board.nodes.find((n: any) => n.id === 'a')!;
+  const b = after.board.nodes.find((n: any) => n.id === 'b')!;
+  const c = after.board.nodes.find((n: any) => n.id === 'c')!;
   expect(Math.abs(a.y - b.y)).toBeLessThan(2); expect(Math.abs(b.y - c.y)).toBeLessThan(2); expect(a.x).toBeLessThan(b.x); expect(b.x).toBeLessThan(c.x);
-  await page.reload(); await expect(page.locator('.semantic-map-node')).toHaveCount(10);
+  await page.reload();
+  await expect(page.locator('.board-node')).toHaveCount(10);
+  await expect(page.locator('.spatial-reading-note')).toContainText(plan.description);
   expect((await stored(page)).history.past.length).toBe(after.history.past.length);
   await page.getByRole('button', { name: '撤销', exact: true }).click();
   await expect.poll(async () => (await stored(page)).board.metadata['agentboard.presentation']?.spatialPlan).toBeUndefined();
 });
 
-test('map details run the original interactive content and preserve state across close and reload', async ({ page }) => {
+test('interactive visuals work directly on the unified canvas and preserve state across reload', async ({ page }) => {
   await respond(page, response); await init(page, scenario()); await page.getByRole('button', { name: '智能布局', exact: true }).click();
-  await expect(page.locator('.semantic-map-node')).toHaveCount(10);
-  await page.getByRole('button', { name: '查看内容：方向 A · 会议行动助手', exact: true }).click();
-  const dialog = page.getByRole('dialog', { name: '方向 A · 会议行动助手', exact: true }); await expect(dialog).toBeVisible();
-  const frame = dialog.frameLocator('iframe'); await frame.locator('#people').focus(); await frame.locator('#people').press('End');
+  await expect(page.locator('.spatial-reading-note')).toBeVisible();
+  await expect(page.locator('.canvas-content')).not.toHaveClass(/presentation-settling/);
+  const frame = page.locator('[data-node-id="a"]').frameLocator('iframe');
+  await frame.locator('#people').focus(); await frame.locator('#people').press('End');
   await expect(frame.locator('#result')).toHaveText('20 位用户');
-  await dialog.getByRole('button', { name: '返回结构视图', exact: true }).click();
-  await page.getByRole('button', { name: '查看内容：方向 A · 会议行动助手', exact: true }).click();
-  await expect(dialog.frameLocator('iframe').locator('#people')).toHaveValue('20');
-  await dialog.getByRole('button', { name: '返回结构视图', exact: true }).click();
-  await page.reload(); await expect(page.locator('.semantic-map-node')).toHaveCount(10);
-  await page.getByRole('button', { name: '查看内容：方向 A · 会议行动助手', exact: true }).click();
-  await expect(page.getByRole('dialog').frameLocator('iframe').locator('#people')).toHaveValue('20');
-  await page.getByRole('button', { name: '围绕这项继续讨论', exact: true }).click();
-  await expect(page.locator('.prompt-bar textarea')).toBeFocused(); await expect(page.locator('.prompt-scope-button')).toContainText('方向 A');
+  await page.reload();
+  await expect(page.locator('[data-node-id="a"]').frameLocator('iframe').locator('#people')).toHaveValue('20');
 });
 
 test('spatial-only action cannot rewrite content or apply a stale plan', async ({ page }) => {
@@ -88,23 +90,12 @@ test('spatial-only action cannot rewrite content or apply a stale plan', async (
   expect((await stored(page)).board.metadata['agentboard.presentation']?.spatialPlan).toBeUndefined();
 });
 
-test('new generation can provide its semantic composition in the same response', async ({ page }) => {
+test('new generation can provide its semantic composition in the same response on the unified canvas', async ({ page }) => {
   const content = scenario(); await respond(page, { ...response, ops: [...content.nodes.map(node => ({ op: 'add_node', node })), ...content.groups.map(group => ({ op: 'add_group', group }))] });
   await init(page, { ...content, nodes: [], groups: [] }); await page.locator('.prompt-bar textarea').fill('帮我比较这几个产品方向'); await page.locator('.prompt-bar textarea').press('Enter');
-  await expect(page.locator('.semantic-map-node')).toHaveCount(10);
+  await expect(page.locator('.board-node')).toHaveCount(10);
+  await expect(page.locator('.spatial-reading-note')).toContainText(plan.description);
   expect((await stored(page)).history.past).toHaveLength(1);
-  await page.getByRole('button', { name: '内容', exact: true }).click(); await expect(page.locator('.board-node')).toHaveCount(10);
-  await page.getByRole('button', { name: '结构', exact: true }).click(); await expect(page.locator('.semantic-map-node')).toHaveCount(10);
-});
-
-test('adding a card from the structure map opens the editable canvas and preserves the original nodes', async ({ page }) => {
-  await respond(page, response); await init(page, scenario()); await page.getByRole('button', { name: '智能布局', exact: true }).click();
-  await expect(page.locator('.semantic-map-node')).toHaveCount(10);
-  await page.getByRole('button', { name: '+ 卡片', exact: true }).click();
-  await expect(page.locator('.board-node')).toHaveCount(11); await expect(page.locator('.title-inline')).toBeFocused();
-  await page.locator('.title-inline').fill('我补充的实际观察'); await page.locator('.title-inline').press('Enter');
-  expect((await stored(page)).board.nodes.map((n: any) => n.title)).toContain('我补充的实际观察');
-  await page.getByRole('button', { name: '结构', exact: true }).click(); await expect(page.locator('.semantic-map-node')).toHaveCount(11);
 });
 
 test('an argument gets a different spatial explanation, with evidence and risks on opposite sides', async ({ page }) => {
@@ -112,11 +103,14 @@ test('an argument gets a different spatial explanation, with evidence and risks 
   const edges = [{ id: 'e1j', from: 'e1', to: 'judgement', label: '支持' }, { id: 'e2j', from: 'e2', to: 'judgement', label: '支持' }, { id: 'rj', from: 'risk', to: 'judgement', type: 'line', label: '约束' }, { id: 'ja', from: 'judgement', to: 'action', label: '下一步' }];
   const argument = { description: '判断居中，左侧看证据、右侧看风险，下面接行动。', root: { direction: 'column', children: [{ direction: 'row', children: [{ direction: 'column', label: '支持证据', children: [{ nodeId: 'e1' }, { nodeId: 'e2' }] }, { nodeId: 'judgement' }, { direction: 'column', label: '待验证的风险', children: [{ nodeId: 'risk' }] }] }, { nodeId: 'action' }] } };
   await respond(page, { ...response, presentation: { layout: 'auto', plan: argument } }); await init(page, { ...scenario(), nodes, groups: [], edges });
-  await page.getByRole('button', { name: '智能布局', exact: true }).click(); await expect(page.locator('.semantic-map-node')).toHaveCount(5);
+  await page.getByRole('button', { name: '智能布局', exact: true }).click();
+  await expect(page.locator('.spatial-reading-note')).toContainText(argument.description);
+  await expect(page.locator('.canvas-content')).not.toHaveClass(/presentation-settling/);
   await page.getByRole('button', { name: '关闭完成提示', exact: true }).click();
-  const left = (await page.locator('[data-map-node-id="e1"]').boundingBox())!, center = (await page.locator('[data-map-node-id="judgement"]').boundingBox())!, right = (await page.locator('[data-map-node-id="risk"]').boundingBox())!;
+  const after = (await stored(page)).board.nodes;
+  const left = after.find((n: any) => n.id === 'e1')!, center = after.find((n: any) => n.id === 'judgement')!, right = after.find((n: any) => n.id === 'risk')!;
   expect(left.x).toBeLessThan(center.x); expect(center.x).toBeLessThan(right.x);
-  await expect(page.locator('.semantic-map-edges > g')).toHaveCount(4);
+  await expect(page.locator('.edge-item')).toHaveCount(4);
 });
 
 test('edits made while the model is planning cannot be overwritten by its stale result', async ({ page }) => {
@@ -134,12 +128,10 @@ test('edits made while the model is planning cannot be overwritten by its stale 
 });
 
 test('local structure fallback uses relationships and remains usable on a phone', async ({ page }) => {
-  await init(page, scenario(), false); await page.getByRole('button', { name: '智能布局', exact: true }).click(); await expect(page.locator('.semantic-map-node')).toHaveCount(10);
+  await init(page, scenario(), false); await page.getByRole('button', { name: '智能布局', exact: true }).click();
   await expect(page.locator('.spatial-note-source')).toHaveText('根据已有关系整理');
   await page.setViewportSize({ width: 390, height: 844 }); await page.getByRole('button', { name: '总览', exact: true }).click();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  await page.getByRole('button', { name: '查看内容：先验证哪一个产品方向？', exact: true }).click(); await expect(page.getByRole('dialog')).toBeVisible();
-  await page.getByRole('button', { name: '返回结构视图', exact: true }).click();
 });
 
 test('real CLI understands existing content and returns a spatial plan without rewriting it', async ({ page }) => {
@@ -149,9 +141,9 @@ test('real CLI understands existing content and returns a spatial plan without r
   if (process.env.AGENTBOARD_SPATIAL_SEED) content = JSON.parse(await readFile(process.env.AGENTBOARD_SPATIAL_SEED, 'utf8'));
   await page.addInitScript(({ board, cliId }) => { if (window.top !== window) return; localStorage.setItem('agentboard.config', JSON.stringify({ provider: 'local-cli', cliId })); localStorage.setItem('agentboard.sessions', JSON.stringify({ activeId: 'live', sessions: [{ id: 'live', title: '真实内容的空间组织', board, createdAt: 1, updatedAt: 1 }] })); }, { board: content, cliId });
   await page.goto('/'); await page.getByRole('button', { name: '智能布局', exact: true }).click();
-  await expect(page.locator('.semantic-map-node, .run-recovery').first()).toBeVisible({ timeout: 240000 });
+  await expect(page.locator('.spatial-reading-note, .run-recovery').first()).toBeVisible({ timeout: 240000 });
   await expect(page.locator('.run-recovery')).toHaveCount(0);
-  await expect(page.locator('.semantic-map-node')).toHaveCount(content.nodes.length);
+  await expect(page.locator('.board-node')).toHaveCount(content.nodes.length);
   const session = await stored(page);
   expect(session.board.nodes.map((n: any) => [n.id, n.title, n.body, n.visual])).toEqual(content.nodes.map(n => [n.id, n.title, n.body, (n as any).visual]));
   await mkdir('docs/verification', { recursive: true });

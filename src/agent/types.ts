@@ -4,8 +4,6 @@ export type { AgentProgressEvent } from '../types/dsl';
 import type { AgentProgressEvent } from '../types/dsl';
 export type AgentProgressEventType = AgentProgressEvent['type'];
 
-export type LocalCliPurpose = 'discovery' | 'evidence-repair';
-
 /** Input to an agent adapter */
 export interface AgentRequest {
   boardState: BoardDSL;
@@ -14,7 +12,6 @@ export interface AgentRequest {
   taskPolicy?: AgentTaskPolicy;
   allowedOps?: PatchOpType[];
   runId?: string;
-  purpose?: 'evidence-repair';
   runContext?: AgentRunEvent[];
   /** Recent human edits to the board since the last agent call */
   recentEditEvents?: BoardEditEvent[];

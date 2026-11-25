@@ -12,6 +12,7 @@ describe('API model flexibility and lifecycle', () => {
     const fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ choices: [{ message: { content: answer } }] }) });
     vi.stubGlobal('fetch', fetch);
     await new OpenAIAgentAdapter({ apiKey: 'test', model: 'chosen-model', maxOutputTokens: 32768 }).generateResponse({ boardState: board, userMessage: 'Create a visual' });
+    expect(fetch.mock.calls[0][1]).toMatchObject({ redirect: 'error', credentials: 'omit', referrerPolicy: 'no-referrer', cache: 'no-store' });
     const body = JSON.parse(fetch.mock.calls[0][1].body);
     expect(body.model).toBe('chosen-model');
     expect(body.max_completion_tokens).toBe(32768);
@@ -22,6 +23,21 @@ describe('API model flexibility and lifecycle', () => {
     vi.stubGlobal('fetch', fetch);
     await new OpenAIAgentAdapter({ apiKey: 'test', baseUrl: 'https://compatible.example/v1' }).generateResponse({ boardState: board, userMessage: 'Create' });
     expect(JSON.parse(fetch.mock.calls[0][1].body).max_tokens).toBe(16384);
+  });
+  it('accepts loopback HTTP and rejects insecure or credential-bearing endpoints before sending any request', async () => {
+    const fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ choices: [{ message: { content: answer } }] }) });
+    vi.stubGlobal('fetch', fetch);
+    const request = { boardState: board, userMessage: 'Create' };
+    await new OpenAIAgentAdapter({ apiKey: 'test', baseUrl: 'http://127.0.0.1:11434' }).generateResponse(request);
+    expect(fetch.mock.calls[0][0]).toBe('http://127.0.0.1:11434/v1/chat/completions');
+    fetch.mockClear();
+    for (const baseUrl of ['http://compatible.example/v1', 'https://name:password@compatible.example', 'https://compatible.example/v1#fragment', 'https://compatible.example/v1?parameter=example']) {
+      await expect(new OpenAIAgentAdapter({ apiKey: 'test', baseUrl }).generateResponse(request))
+        .rejects.toMatchObject({ code: 'API_ERROR', retryable: false });
+      await expect(new ClaudeAgentAdapter({ provider: 'claude', apiKey: 'test', baseUrl }).generateResponse(request))
+        .rejects.toMatchObject({ code: 'API_ERROR', retryable: false });
+    }
+    expect(fetch).not.toHaveBeenCalled();
   });
   for (const provider of ['openai', 'claude'] as const) {
     it(`streams ${provider} visible text into a complete response without changing the model`, async () => {

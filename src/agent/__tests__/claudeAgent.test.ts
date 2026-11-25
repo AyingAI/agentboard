@@ -139,6 +139,17 @@ describe('ClaudeAgentAdapter', () => {
     }
   });
 
+  it('omits echoed input from a provider HTTP error and rejects redirects', async () => {
+    const json = vi.fn().mockResolvedValue({ error: 'echoed-synthetic-value' });
+    const fetch = vi.fn().mockResolvedValue({ ok: false, status: 400, json });
+    globalThis.fetch = fetch as unknown as typeof globalThis.fetch;
+    const adapter = new ClaudeAgentAdapter({ provider: 'claude', apiKey: 'echoed-synthetic-value' });
+    await expect(adapter.generateResponse({ boardState: testBoard(), userMessage: 'test' }))
+      .rejects.toEqual({ code: 'API_ERROR', message: 'API 返回错误 (400)' });
+    expect(json).not.toHaveBeenCalled();
+    expect(fetch.mock.calls[0][1]).toMatchObject({ redirect: 'error', credentials: 'omit', referrerPolicy: 'no-referrer' });
+  });
+
   it('should throw PARSE_ERROR on malformed JSON response', async () => {
     globalThis.fetch = vi.fn().mockResolvedValue(
       mockAnthropicResponse('This is not JSON at all, just some text.'),

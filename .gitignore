@@ -4,11 +4,13 @@ dist/
 .DS_Store
 .env
 .env.*
+.envrc
 .npmrc
 *.pem
 *.key
 *.p12
 *.pfx
+*.kdbx
 docs/
 diagrams/
 
@@ -33,4 +35,5 @@ temp/
 test-results/
 playwright-report/
 playwright/.cache/
+playwright/.auth/
 coverage/

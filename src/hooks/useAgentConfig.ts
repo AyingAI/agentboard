@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react';
 import type { AgentConfig, AgentProvider } from '../types/dsl';
-import { normalizeJevConfig } from '../agent/jevConfig';
+import { normalizeApiBaseUrl } from '../agent/apiEndpoint';
 import { loadAgentConfig, saveAgentConfig } from '../storage';
 
 export function useAgentConfig() {
@@ -8,7 +8,8 @@ export function useAgentConfig() {
 
   const setProvider = useCallback((provider: AgentProvider) => {
     setConfig((prev) => {
-      const next = { ...prev, provider };
+      if (provider === prev.provider) return prev;
+      const next = { ...prev, provider, apiKey: undefined, baseUrl: undefined };
       saveAgentConfig(next);
       return next;
     });
@@ -40,7 +41,10 @@ export function useAgentConfig() {
 
   const setBaseUrl = useCallback((baseUrl: string) => {
     setConfig((prev) => {
-      const next = { ...prev, baseUrl };
+      const { provider } = prev;
+      const sameEndpoint = provider === 'local-cli'
+        || normalizeApiBaseUrl(provider, prev.baseUrl) === normalizeApiBaseUrl(provider, baseUrl);
+      const next = { ...prev, baseUrl, apiKey: sameEndpoint ? prev.apiKey : undefined };
       saveAgentConfig(next);
       return next;
     });
@@ -54,9 +58,5 @@ export function useAgentConfig() {
     });
   }, []);
 
-  const setJev = useCallback((jev: AgentConfig['jev']) => {
-    setConfig(prev => { const next = { ...prev, jev: normalizeJevConfig(jev) }; saveAgentConfig(next); return next; });
-  }, []);
-
-  return { config, setProvider, setApiKey, setModel, setCliId, setBaseUrl, setMaxOutputTokens, setJev };
+  return { config, setProvider, setApiKey, setModel, setCliId, setBaseUrl, setMaxOutputTokens };
 }

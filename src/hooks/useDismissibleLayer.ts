@@ -2,19 +2,23 @@ import { useEffect, useRef } from 'react';
 import type { RefObject } from 'react';
 
 /** Dismiss without consuming the outside action or moving its focus. */
-export function useDismissibleLayer({ open, root, onDismiss, returnFocus }: {
+export function useDismissibleLayer({ open, root, popup, onDismiss, returnFocus }: {
   open: boolean;
   root: RefObject<HTMLElement>;
+  popup?: RefObject<HTMLElement>;
   onDismiss: () => void;
   returnFocus?: RefObject<HTMLElement>;
 }) {
-  const latest = useRef({ root, onDismiss, returnFocus });
-  latest.current = { root, onDismiss, returnFocus };
+  const latest = useRef({ root, popup, onDismiss, returnFocus });
+  latest.current = { root, popup, onDismiss, returnFocus };
   useEffect(() => {
     if (!open) return;
     function outside(event: Event) {
-      const container = latest.current.root.current;
-      if (container && (event.composedPath().includes(container) || event.target instanceof Node && container.contains(event.target))) return;
+      const path = event.composedPath();
+      const { root, popup } = latest.current;
+      if ([root.current, popup?.current].some(container =>
+        container && (path.includes(container) || event.target instanceof Node && container.contains(event.target)),
+      )) return;
       latest.current.onDismiss();
     }
     function escape(event: KeyboardEvent) {
